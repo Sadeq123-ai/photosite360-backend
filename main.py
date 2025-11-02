@@ -33,8 +33,17 @@ cloudinary.config(
 )
 
 # Base de datos
-SQLALCHEMY_DATABASE_URL = "sqlite:///./photosite360.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+import os
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./photosite360.db")
+
+# Railway proporciona DATABASE_URL con postgres:// pero SQLAlchemy necesita postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+if DATABASE_URL.startswith("postgresql://"):
+    engine = create_engine(DATABASE_URL)
+else:
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
