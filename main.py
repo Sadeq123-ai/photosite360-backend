@@ -95,15 +95,21 @@ security = HTTPBearer()
 # Aplicación FastAPI
 app = FastAPI(title="PhotoSite360 API")
 
-# CORS - Permitir todos los orígenes para producción
+# CORS - Configuración completa para producción
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173", 
+        "https://photosite360-frontend-sadeq123-ias-projects.vercel.app",
+        "https://photosite360-frontend.vercel.app",
+        "https://*.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex="https://.*\.vercel\.app"
 )
-
 # Servir archivos estáticos
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
