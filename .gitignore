@@ -1,0 +1,17 @@
+__pycache__/ 
+*.pyc 
+*.db 
+.env 
+.env.local 
+notepad 
+npm 
+python 
+photosite360*.db 
+*_completo.py 
+*_final.py 
+*_persistente.py 
+debug_*.py 
+check_*.py 
+create_user*.py 
+backend_*.py 
+server_*.py 
