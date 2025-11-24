@@ -168,20 +168,21 @@ security = HTTPBearer()
 # Aplicación FastAPI
 app = FastAPI(title="PhotoSite360 API")
 
-# CORS - CONFIGURACIÓN CORREGIDA PARA PRODUCCIÓN
+# CORS - CONFIGURACIÓN DEFINITIVA
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:5173", 
         "https://photosite360-frontend.onrender.com",
+        "https://photosite360-frontend.onrender.com/",
         "https://*.render.com"
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
-
 # Handler para OPTIONS requests
 @app.options("/{rest_of_path:path}")
 async def preflight_handler(rest_of_path: str):
@@ -328,7 +329,20 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
-
+# Middleware para logging de requests
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    print(f"📍 Request: {request.method} {request.url}")
+    print(f"📍 Origin: {request.headers.get('origin')}")
+    print(f"📍 Headers: {dict(request.headers)}")
+    
+    response = await call_next(request)
+    
+    print(f"📍 Response: {response.status_code}")
+    response.headers["Access-Control-Allow-Origin"] = "https://photosite360-frontend.onrender.com"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
 # ========================================
 # RUTAS DE AUTENTICACIÓN
 # ========================================
