@@ -15,3 +15,9 @@ check_*.py
 create_user*.py 
 backend_*.py 
 server_*.py 
+crear_usuario.py 
+create_test_user.py 
+create_user.js 
+flask_server.py 
+main_8000.py 
+port_checker.py 
