@@ -168,14 +168,13 @@ security = HTTPBearer()
 # Aplicación FastAPI
 app = FastAPI(title="PhotoSite360 API")
 
-# CORS - CONFIGURACIÓN DEFINITIVA
+# CORS - CONFIGURACIÓN CORREGIDA PARA PRODUCCIÓN
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:5173", 
         "https://photosite360-frontend.onrender.com",
-        "https://photosite360-frontend.onrender.com/",
         "https://*.render.com"
     ],
     allow_credentials=True,
@@ -183,6 +182,18 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+# Middleware para logging de requests
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    print(f"📍 Request: {request.method} {request.url}")
+    print(f"📍 Origin: {request.headers.get('origin')}")
+    
+    response = await call_next(request)
+    
+    print(f"📍 Response: {response.status_code}")
+    return response
+
 # Handler para OPTIONS requests
 @app.options("/{rest_of_path:path}")
 async def preflight_handler(rest_of_path: str):
@@ -329,20 +340,7 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
-# Middleware para logging de requests
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    print(f"📍 Request: {request.method} {request.url}")
-    print(f"📍 Origin: {request.headers.get('origin')}")
-    print(f"📍 Headers: {dict(request.headers)}")
-    
-    response = await call_next(request)
-    
-    print(f"📍 Response: {response.status_code}")
-    response.headers["Access-Control-Allow-Origin"] = "https://photosite360-frontend.onrender.com"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    
-    return response
+
 # ========================================
 # RUTAS DE AUTENTICACIÓN
 # ========================================
@@ -1304,6 +1302,30 @@ def get_public_photo(photo_id: int, db: Session = Depends(get_db)):
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found")
     return photo
+
+# ========================================
+# ENDPOINTS DE DEBUG PARA PRODUCCIÓN
+# ========================================
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.utcnow().isoformat(),
+        "cors_configured": True,
+        "database": "connected"
+    }
+
+@app.get("/api/debug/cors")
+async def debug_cors(request: Request):
+    return {
+        "origin": request.headers.get("origin"),
+        "user_agent": request.headers.get("user-agent"),
+        "cors_headers": {
+            "allow_origin": "https://photosite360-frontend.onrender.com",
+            "allow_methods": "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+        }
+    }
 
 # ========================================
 # RUTA RAÍZ
