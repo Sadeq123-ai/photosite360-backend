@@ -1,8 +1,8 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from passlib.context import CryptContext
@@ -19,6 +19,10 @@ import re
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
+import secrets
+
+# ✅ IMPORTS DE SERVICIOS
+from services.cloudinary_service import CloudinaryService
 
 # Configuración
 SECRET_KEY = "tu_clave_secreta_super_segura_cambiala_en_produccion"
@@ -54,6 +58,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     full_name = Column(String)
+    username = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
     projects = relationship("Project", back_populates="owner")
@@ -82,26 +87,26 @@ class Photo(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     project = relationship("Project", back_populates="photos")
 
-# ✅ NUEVOS MODELOS PARA GALERÍA
+# ✅ MODELOS PARA GALERÍA
 class GalleryImage(Base):
     __tablename__ = "gallery_images"
     id = Column(Integer, primary_key=True, index=True)
     filename = Column(String)
-    url = Column(String)  # URL de Cloudinary
-    unique_url = Column(String, unique=True)  # URL única para compartir
+    url = Column(String)
+    unique_url = Column(String, unique=True)
     file_size = Column(Integer)
     mime_type = Column(String)
     project_id = Column(Integer, ForeignKey("projects.id"))
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     uploaded_by = Column(Integer, ForeignKey("users.id"))
     
-    # Metadatos estructurados para el nuevo sistema de etiquetas
-    image_type = Column(String, default="edification")  # 'edification' o 'linear'
-    level = Column(String, nullable=True)    # P00, P01, etc.
-    room = Column(String, nullable=True)     # Salon, Cocina, etc.  
-    pk_value = Column(String, nullable=True) # 0+000, 1+250, etc.
-    section = Column(String, nullable=True)  # Tramo-A, etc.
-    custom_tags = Column(String, nullable=True)  # JSON string de tags personalizados
+    # Metadatos estructurados para el sistema de etiquetas
+    image_type = Column(String, default="edification")
+    level = Column(String, nullable=True)
+    room = Column(String, nullable=True)
+    pk_value = Column(String, nullable=True)
+    section = Column(String, nullable=True)
+    custom_tags = Column(String, nullable=True)
     
     project = relationship("Project")
     uploader = relationship("User")
@@ -110,7 +115,7 @@ class GalleryTag(Base):
     __tablename__ = "gallery_tags"
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"))
-    tag_type = Column(String)  # 'level', 'room', 'pk', 'section', 'custom'
+    tag_type = Column(String)
     tag_value = Column(String)
     tag_color = Column(String, default='#3b82f6')
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -118,6 +123,36 @@ class GalleryTag(Base):
     
     project = relationship("Project")
     creator = relationship("User")
+
+# ========================================
+# ✅ MODELOS DE INVITACIONES
+class ProjectCollaborator(Base):
+    __tablename__ = "project_collaborators"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"))
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    permission_level = Column(String)
+    can_edit = Column(Boolean, default=False)
+    can_delete = Column(Boolean, default=False)
+    can_invite = Column(Boolean, default=False)
+    added_at = Column(DateTime, default=datetime.utcnow)
+    added_by = Column(Integer, ForeignKey("users.id"))
+
+class Invitation(Base):
+    __tablename__ = "invitations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, unique=True, index=True)
+    inviter_id = Column(Integer, ForeignKey("users.id"))
+    invitee_email = Column(String, index=True)
+    permission_level = Column(String)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    status = Column(String, default="PENDING")
+    message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime)
+    accepted_at = Column(DateTime, nullable=True)
 
 # Crear tablas
 Base.metadata.create_all(bind=engine)
@@ -133,7 +168,7 @@ security = HTTPBearer()
 # Aplicación FastAPI
 app = FastAPI(title="PhotoSite360 API")
 
-# CORS - CONFIGURACIÓN COMPLETA QUE SÍ FUNCIONA
+# CORS - CONFIGURACIÓN COMPLETA
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -168,6 +203,7 @@ class UserCreate(BaseModel):
     email: str
     password: str
     full_name: str
+    username: str
 
 class UserLogin(BaseModel):
     email: str
@@ -209,7 +245,7 @@ class PhotoResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# ✅ MODELOS PYDANTIC PARA GALERÍA (DEFINIDOS ANTES DE USARSE)
+# ✅ MODELOS PYDANTIC PARA GALERÍA
 class GalleryImageCreate(BaseModel):
     filename: str
     image_type: str = "edification"
@@ -230,7 +266,7 @@ class GalleryImageResponse(BaseModel):
     uploaded_at: datetime
     image_type: str
     level: Optional[str]
-    room: Optional[str] 
+    room: Optional[str]
     pk_value: Optional[str]
     section: Optional[str]
     custom_tags: Optional[List[str]]
@@ -297,7 +333,10 @@ async def get_current_user(
         raise credentials_exception
     return user
 
-# Rutas de autenticación
+# ========================================
+# RUTAS DE AUTENTICACIÓN
+# ========================================
+
 @app.post("/api/auth/register", response_model=Token)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.email == user.email).first()
@@ -308,6 +347,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     new_user = User(
         email=user.email,
         full_name=user.full_name,
+        username=user.username,
         hashed_password=hashed_password
     )
     db.add(new_user)
@@ -334,10 +374,311 @@ def get_me(current_user: User = Depends(get_current_user)):
     return {
         "id": current_user.id,
         "email": current_user.email,
-        "full_name": current_user.full_name
+        "full_name": current_user.full_name,
+        "username": current_user.username
     }
 
-# Rutas de proyectos
+# ============================================
+# RUTAS DE INVITACIONES
+# ============================================
+
+# GET /api/invitations/pending
+@app.get("/api/invitations/pending")
+def get_pending_invitations(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Obtener invitaciones pendientes del usuario actual"""
+    invitations = db.query(Invitation).filter(
+        Invitation.invitee_email == current_user.email,
+        Invitation.status == "PENDING",
+        Invitation.expires_at > datetime.utcnow()
+    ).all()
+    
+    result = []
+    for inv in invitations:
+        inviter = db.query(User).filter(User.id == inv.inviter_id).first()
+        project_name = None
+        if inv.project_id:
+            project = db.query(Project).filter(Project.id == inv.project_id).first()
+            project_name = project.name if project else None
+        
+        result.append({
+            "id": inv.id,
+            "token": inv.token,
+            "inviter_name": inviter.full_name if inviter else "Unknown",
+            "project_name": project_name,
+            "permission_level": inv.permission_level,
+            "message": inv.message,
+            "created_at": inv.created_at.isoformat(),
+            "expires_at": inv.expires_at.isoformat()
+        })
+    
+    return result
+
+# POST /api/invitations/invite-global
+@app.post("/api/invitations/invite-global")
+def invite_global_collaborator(
+    invitee_email: str = Body(...),
+    message: str = Body(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Crear invitación global"""
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(days=7)
+    
+    invitation = Invitation(
+        token=token,
+        inviter_id=current_user.id,
+        invitee_email=invitee_email,
+        permission_level="GLOBAL_COLLABORATOR",
+        project_id=None,
+        message=message,
+        expires_at=expires_at
+    )
+    
+    db.add(invitation)
+    db.commit()
+    
+    return {
+        "message": "Invitación enviada",
+        "invitation_id": invitation.id,
+        "expires_at": expires_at.isoformat()
+    }
+
+# POST /api/projects/{project_id}/invite
+@app.post("/api/projects/{project_id}/invite")
+def invite_to_project(
+    project_id: int,
+    invitee_email: str = Body(...),
+    permission_level: str = Body(...),
+    message: str = Body(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Invitar colaborador a proyecto específico"""
+    # Verificar que el proyecto existe
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    
+    # Verificar que el usuario es propietario
+    if project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Solo el propietario puede invitar")
+    
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(days=7)
+    
+    invitation = Invitation(
+        token=token,
+        inviter_id=current_user.id,
+        invitee_email=invitee_email,
+        permission_level=permission_level,
+        project_id=project_id,
+        message=message,
+        expires_at=expires_at
+    )
+    
+    db.add(invitation)
+    db.commit()
+    
+    return {
+        "message": "Invitación enviada",
+        "invitation_id": invitation.id,
+        "expires_at": expires_at.isoformat()
+    }
+
+
+@app.get("/api/invitations/pending")
+async def get_pending_invitations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Obtener invitaciones pendientes del usuario actual
+    """
+    invitations = db.query(Invitation).filter(
+        Invitation.invitee_email == current_user.email,
+        Invitation.status == "PENDING",
+        Invitation.expires_at > datetime.utcnow()
+    ).all()
+    
+    result = []
+    for inv in invitations:
+        inviter = db.query(User).filter(User.id == inv.inviter_id).first()
+        project = None
+        if inv.project_id:
+            project = db.query(Project).filter(Project.id == inv.project_id).first()
+        
+        result.append({
+            "id": inv.id,
+            "token": inv.token,
+            "inviter_name": inviter.username if inviter else "Usuario desconocido",
+            "project_name": project.name if project else None,
+            "permission_level": inv.permission_level,
+            "message": inv.message,
+            "created_at": inv.created_at.isoformat(),
+            "expires_at": inv.expires_at.isoformat()
+        })
+    
+    return result
+
+
+@app.post("/api/invitations/{token}/accept")
+async def accept_invitation(
+    token: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Aceptar una invitación
+    """
+    invitation = db.query(Invitation).filter(
+        Invitation.token == token,
+        Invitation.status == "PENDING"
+    ).first()
+    
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Invitación no encontrada")
+    
+    if invitation.invitee_email != current_user.email:
+        raise HTTPException(status_code=403, detail="Esta invitación no es para ti")
+    
+    if invitation.expires_at < datetime.utcnow():
+        invitation.status = "EXPIRED"
+        db.commit()
+        raise HTTPException(status_code=400, detail="Invitación expirada")
+    
+    # Crear colaboración si es para un proyecto
+    if invitation.project_id:
+        collaboration = ProjectCollaborator(
+            project_id=invitation.project_id,
+            user_id=current_user.id,
+            permission_level=invitation.permission_level,
+            can_edit=invitation.permission_level != "VIEWER",
+            can_delete=False,
+            can_invite=False,
+            added_by=invitation.inviter_id
+        )
+        db.add(collaboration)
+    
+    # Marcar invitación como aceptada
+    invitation.status = "ACCEPTED"
+    invitation.accepted_at = datetime.utcnow()
+    
+    db.commit()
+    
+    return {"message": "Invitación aceptada exitosamente"}
+
+
+@app.post("/api/invitations/{token}/reject")
+async def reject_invitation(
+    token: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Rechazar una invitación
+    """
+    invitation = db.query(Invitation).filter(
+        Invitation.token == token,
+        Invitation.status == "PENDING"
+    ).first()
+    
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Invitación no encontrada")
+    
+    if invitation.invitee_email != current_user.email:
+        raise HTTPException(status_code=403, detail="Esta invitación no es para ti")
+    
+    invitation.status = "REJECTED"
+    db.commit()
+    
+    return {"message": "Invitación rechazada"}
+
+
+# GET /api/projects/{project_id}/collaborators
+@app.get("/api/projects/{project_id}/collaborators")
+def get_project_collaborators(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Obtener lista de colaboradores del proyecto"""
+    # Verificar acceso al proyecto
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    
+    # Solo el propietario o colaboradores pueden ver la lista
+    if project.owner_id != current_user.id:
+        collaborator = db.query(ProjectCollaborator).filter(
+            ProjectCollaborator.project_id == project_id,
+            ProjectCollaborator.user_id == current_user.id
+        ).first()
+        if not collaborator:
+            raise HTTPException(status_code=403, detail="No tienes acceso a este proyecto")
+    
+    # Obtener colaboradores
+    collaborators = db.query(ProjectCollaborator).filter(
+        ProjectCollaborator.project_id == project_id
+    ).all()
+    
+    result = []
+    for collab in collaborators:
+        user = db.query(User).filter(User.id == collab.user_id).first()
+        if user:
+            result.append({
+                "id": collab.id,
+                "user_id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "permission_level": collab.permission_level,
+                "can_edit": collab.can_edit,
+                "can_delete": collab.can_delete,
+                "can_invite": collab.can_invite,
+                "added_at": collab.added_at.isoformat()
+            })
+    
+    return result
+
+# DELETE /api/projects/{project_id}/collaborators/{user_id}
+@app.delete("/api/projects/{project_id}/collaborators/{user_id}")
+def remove_collaborator(
+    project_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Eliminar colaborador del proyecto"""
+    # Verificar que el proyecto existe
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    
+    # Solo el propietario puede eliminar colaboradores
+    if project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Solo el propietario puede eliminar colaboradores")
+    
+    # Eliminar colaborador
+    collaborator = db.query(ProjectCollaborator).filter(
+        ProjectCollaborator.project_id == project_id,
+        ProjectCollaborator.user_id == user_id
+    ).first()
+    
+    if not collaborator:
+        raise HTTPException(status_code=404, detail="Colaborador no encontrado")
+    
+    db.delete(collaborator)
+    db.commit()
+    
+    return {"message": "Colaborador eliminado"}
+
+# ========================================
+# RUTAS DE PROYECTOS
+# ========================================
+
 @app.post("/api/projects/", response_model=ProjectResponse)
 def create_project(
     project: ProjectCreate,
@@ -383,18 +724,100 @@ def delete_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    project = db.query(Project).filter(
-        Project.id == project_id,
-        Project.owner_id == current_user.id
-    ).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    db.delete(project)
-    db.commit()
-    return {"message": "Project deleted successfully"}
+    """
+    Elimina un proyecto y TODOS sus archivos en Cloudinary
+    """
+    try:
+        # 1. Buscar el proyecto
+        project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        ).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        print(f"🗑️ Iniciando eliminación del proyecto {project_id}: {project.name}")
+        
+        # 2. Obtener conteo de archivos antes de eliminar
+        photos_count = db.query(Photo).filter(Photo.project_id == project_id).count()
+        gallery_count = db.query(GalleryImage).filter(GalleryImage.project_id == project_id).count()
+        
+        print(f"📊 Archivos a eliminar: {photos_count} fotos 360°, {gallery_count} imágenes normales")
+        
+        # 3. Eliminar TODA la carpeta del proyecto en Cloudinary
+        cloudinary_result = CloudinaryService.delete_project_folder(project_id)
+        
+        if cloudinary_result.get('success'):
+            print(f"✅ Cloudinary: {cloudinary_result.get('message')}")
+        else:
+            print(f"⚠️ Cloudinary: {cloudinary_result.get('error')}")
+        
+        # 4. Eliminar registros de fotos 360° en BD
+        db.query(Photo).filter(Photo.project_id == project_id).delete()
+        
+        # 5. Eliminar registros de galería en BD
+        db.query(GalleryImage).filter(GalleryImage.project_id == project_id).delete()
+        
+        # 6. Eliminar tags de galería
+        db.query(GalleryTag).filter(GalleryTag.project_id == project_id).delete()
+        
+        # 7. Eliminar el proyecto
+        db.delete(project)
+        db.commit()
+        
+        print(f"✅ Proyecto {project_id} eliminado completamente")
+        
+        return {
+            "message": "Proyecto eliminado exitosamente",
+            "project_id": project_id,
+            "project_name": project.name,
+            "deleted_photos_360": photos_count,
+            "deleted_gallery": gallery_count,
+            "cloudinary_cleanup": cloudinary_result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error eliminando proyecto: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error eliminando proyecto: {str(e)}")
 
-# Rutas de fotos
+@app.get("/api/projects/{project_id}/storage-info")
+def get_project_storage_info(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Obtiene información de almacenamiento del proyecto en Cloudinary
+    """
+    try:
+        project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        ).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        storage_info = CloudinaryService.get_project_storage_info(project_id)
+        
+        return {
+            "project_id": project_id,
+            "project_name": project.name,
+            "storage": storage_info
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error obteniendo info de almacenamiento: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========================================
+# RUTAS DE FOTOS 360°
+# ========================================
+
 @app.get("/api/projects/{project_id}/photos", response_model=List[PhotoResponse])
 def get_photos(
     project_id: int,
@@ -551,18 +974,33 @@ def delete_photo(
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found")
     
+    # ✅ Eliminar de Cloudinary también
+    try:
+        # Extraer public_id de la URL
+        url_parts = photo.url.split('/')
+        public_id_with_ext = '/'.join(url_parts[-3:])  # photosite360/project_X/filename.jpg
+        public_id = public_id_with_ext.rsplit('.', 1)[0]  # Sin extensión
+        
+        CloudinaryService.delete_photo(public_id)
+        print(f"✓ Foto eliminada de Cloudinary: {public_id}")
+    except Exception as e:
+        print(f"⚠️ No se pudo eliminar de Cloudinary: {e}")
+    
     db.delete(photo)
     db.commit()
     return {"message": "Photo deleted successfully"}
 
-# ✅ ENDPOINTS PARA GALERÍA DE IMÁGENES NORMALES
+# ========================================
+# RUTAS DE GALERÍA DE IMÁGENES NORMALES
+# ========================================
+
 @app.post("/api/projects/{project_id}/gallery/upload")
 async def upload_gallery_image(
     project_id: int,
     file: UploadFile = File(...),
     image_type: str = "edification",
     level: Optional[str] = None,
-    room: Optional[str] = None, 
+    room: Optional[str] = None,
     pk_value: Optional[str] = None,
     section: Optional[str] = None,
     custom_tags: Optional[str] = None,
@@ -570,7 +1008,7 @@ async def upload_gallery_image(
     current_user: User = Depends(get_current_user)
 ):
     project = db.query(Project).filter(
-        Project.id == project_id, 
+        Project.id == project_id,
         Project.owner_id == current_user.id
     ).first()
     if not project:
@@ -579,10 +1017,8 @@ async def upload_gallery_image(
     try:
         print(f"📤 Subiendo imagen de galería: {file.filename}")
         
-        # Leer archivo
         contents = await file.read()
         
-        # Subir a Cloudinary
         upload_result = cloudinary.uploader.upload(
             contents,
             folder=f"photosite360/gallery/project_{project_id}",
@@ -593,10 +1029,8 @@ async def upload_gallery_image(
         cloudinary_url = upload_result['secure_url']
         print(f"✓ Imagen subida exitosamente: {cloudinary_url}")
         
-        # Generar URL única
         unique_url = f"gallery_{project_id}_{datetime.utcnow().timestamp()}_{file.filename}"
         
-        # Procesar custom_tags si existen
         processed_custom_tags = None
         if custom_tags:
             try:
@@ -605,7 +1039,6 @@ async def upload_gallery_image(
             except:
                 processed_custom_tags = custom_tags
         
-        # Crear registro en BD
         gallery_image = GalleryImage(
             filename=file.filename,
             url=cloudinary_url,
@@ -664,7 +1097,6 @@ def get_gallery_images(
     
     images = db.query(GalleryImage).filter(GalleryImage.project_id == project_id).all()
     
-    # Convertir custom_tags de string a lista
     result = []
     for image in images:
         image_data = {
@@ -708,10 +1140,13 @@ def delete_gallery_image(
     if not image:
         raise HTTPException(status_code=404, detail="Gallery image not found")
     
-    # Opcional: Eliminar también de Cloudinary
+    # ✅ Eliminar de Cloudinary
     try:
-        public_id = image.url.split('/')[-1].split('.')[0]
-        cloudinary.uploader.destroy(public_id)
+        url_parts = image.url.split('/')
+        public_id_with_ext = '/'.join(url_parts[-3:])
+        public_id = public_id_with_ext.rsplit('.', 1)[0]
+        
+        CloudinaryService.delete_photo(public_id)
         print(f"✓ Imagen eliminada de Cloudinary: {public_id}")
     except Exception as e:
         print(f"⚠️ No se pudo eliminar de Cloudinary: {e}")
@@ -720,7 +1155,10 @@ def delete_gallery_image(
     db.commit()
     return {"message": "Gallery image deleted successfully"}
 
-# Endpoints para etiquetas de galería
+# ========================================
+# RUTAS DE TAGS DE GALERÍA
+# ========================================
+
 @app.post("/api/projects/{project_id}/gallery/tags", response_model=GalleryTagResponse)
 def create_gallery_tag(
     project_id: int,
@@ -735,7 +1173,6 @@ def create_gallery_tag(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    # Verificar si ya existe
     existing_tag = db.query(GalleryTag).filter(
         GalleryTag.project_id == project_id,
         GalleryTag.tag_type == tag.tag_type,
@@ -782,7 +1219,7 @@ def update_image_metadata(
     image_type: Optional[str] = None,
     level: Optional[str] = None,
     room: Optional[str] = None,
-    pk_value: Optional[str] = None, 
+    pk_value: Optional[str] = None,
     section: Optional[str] = None,
     custom_tags: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -802,7 +1239,6 @@ def update_image_metadata(
     if not image:
         raise HTTPException(status_code=404, detail="Gallery image not found")
     
-    # Actualizar campos proporcionados
     if image_type is not None:
         image.image_type = image_type
     if level is not None:
@@ -832,7 +1268,10 @@ def update_image_metadata(
         }
     }
 
+# ========================================
 # RUTAS PÚBLICAS
+# ========================================
+
 @app.get("/api/public/projects/{project_id}")
 def get_public_project(project_id: int, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -856,13 +1295,35 @@ def get_public_photo(photo_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Photo not found")
     return photo
 
-# Ruta raíz
+# ========================================
+# RUTA RAÍZ
+# ========================================
+
 @app.get("/")
 def root():
-    return {"message": "PhotoSite360 API - Server running"}
+    return {
+        "message": "PhotoSite360 API - Server running",
+        "version": "2.0.0",
+        "features": [
+            "Authentication",
+            "Projects Management",
+            "360° Photos",
+            "Gallery Images",
+            "Cloudinary Integration",
+            "Automatic Cleanup",
+            "Invitations & Permissions"
+        ]
+    }
+
+# ========================================
+# EJECUTAR SERVIDOR
+# ========================================
 
 if __name__ == "__main__":
     import uvicorn
-    import os
-    port = int(os.environ.get("PORT", 8001))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print("🚀 INICIANDO PHOTOSITE360 BACKEND...")
+    print("📦 Cloudinary configurado")
+    print("🗑️ Limpieza automática activada")
+    print("🔐 Sistema de invitaciones activado")
+    print("🌐 Servidor en puerto 5000")
+    uvicorn.run(app, host="0.0.0.0", port=5000, reload=True)
