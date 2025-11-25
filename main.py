@@ -29,7 +29,7 @@ from services.cloudinary_service import CloudinaryService
 # Configuración
 SECRET_KEY = "tu_clave_secreta_super_segura_cambiala_en_produccion"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 43200  # 30 días (30 * 24 * 60 = 43200 minutos)
 
 # Configuración de Cloudinary
 cloudinary.config(
@@ -461,7 +461,86 @@ def invite_global_collaborator(
         "expires_at": expires_at.isoformat(),
         "email_sent": email_sent
     }
-
+# POST /api/invitations/{token}/accept-and-login
+@app.post("/api/invitations/{token}/accept-and-login")
+def accept_invitation_and_login(
+    token: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Aceptar invitación y hacer login automático (sin contraseña)
+    Crea usuario temporal si no existe
+    """
+    invitation = db.query(Invitation).filter(
+        Invitation.token == token,
+        Invitation.status == "PENDING"
+    ).first()
+    
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Invitación no encontrada o ya usada")
+    
+    if invitation.expires_at < datetime.utcnow():
+        invitation.status = "EXPIRED"
+        db.commit()
+        raise HTTPException(status_code=400, detail="Invitación expirada")
+    
+    # Buscar o crear usuario
+    user = db.query(User).filter(User.email == invitation.invitee_email).first()
+    
+    if not user:
+        # Crear usuario temporal (sin contraseña)
+        user = User(
+            email=invitation.invitee_email,
+            full_name=invitation.invitee_email.split('@')[0],  # Usar parte del email como nombre
+            hashed_password=pwd_context.hash(secrets.token_urlsafe(32))  # Password aleatoria
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    
+    # Crear colaboración si es para un proyecto
+    if invitation.project_id:
+        # Verificar si ya es colaborador
+        existing = db.query(ProjectCollaborator).filter(
+            ProjectCollaborator.project_id == invitation.project_id,
+            ProjectCollaborator.user_id == user.id
+        ).first()
+        
+        if not existing:
+            collaboration = ProjectCollaborator(
+                project_id=invitation.project_id,
+                user_id=user.id,
+                permission_level=invitation.permission_level,
+                can_edit=invitation.permission_level != "VIEWER",
+                can_delete=False,
+                can_invite=False,
+                added_by=invitation.inviter_id
+            )
+            db.add(collaboration)
+    
+    # Marcar invitación como aceptada
+    invitation.status = "ACCEPTED"
+    invitation.accepted_at = datetime.utcnow()
+    db.commit()
+    
+    # Generar token JWT (30 días)
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, 
+        expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name
+        },
+        "message": "Invitación aceptada y sesión iniciada",
+        "project_id": invitation.project_id
+    }
 # POST /api/projects/{project_id}/invite
 @app.post("/api/projects/{project_id}/invite")
 def invite_to_project(
