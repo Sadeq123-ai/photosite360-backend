@@ -1,3 +1,4 @@
+from fastapi import FastAPI, Request, Response  # Añade Response aquí
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -173,9 +174,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://localhost:5173", 
-        "https://photosite360-frontend.onrender.com",
-        "https://*.render.com"
+        "http://localhost:5173",
+        "https://photosite360-frontend.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
