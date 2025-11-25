@@ -1,3 +1,4 @@
+from services.email_service import EmailService
 from fastapi import FastAPI, Request, Response  # Añade Response aquí
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -430,7 +431,7 @@ def invite_global_collaborator(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Crear invitación global"""
+    """Crear invitación global y enviar email"""
     token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(days=7)
     
@@ -447,10 +448,18 @@ def invite_global_collaborator(
     db.add(invitation)
     db.commit()
     
+    # Enviar email de invitación
+    email_sent = EmailService.send_invitation_email(
+        to_email=invitee_email,
+        project_name="Colaboración Global en PhotoSite360",
+        invitation_token=token
+    )
+    
     return {
         "message": "Invitación enviada",
         "invitation_id": invitation.id,
-        "expires_at": expires_at.isoformat()
+        "expires_at": expires_at.isoformat(),
+        "email_sent": email_sent
     }
 
 # POST /api/projects/{project_id}/invite
@@ -463,7 +472,7 @@ def invite_to_project(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Invitar colaborador a proyecto específico"""
+    """Invitar colaborador a proyecto específico y enviar email"""
     # Verificar que el proyecto existe
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -489,10 +498,18 @@ def invite_to_project(
     db.add(invitation)
     db.commit()
     
+    # Enviar email de invitación
+    email_sent = EmailService.send_invitation_email(
+        to_email=invitee_email,
+        project_name=project.name,
+        invitation_token=token
+    )
+    
     return {
         "message": "Invitación enviada",
         "invitation_id": invitation.id,
-        "expires_at": expires_at.isoformat()
+        "expires_at": expires_at.isoformat(),
+        "email_sent": email_sent
     }
 
 
