@@ -1346,16 +1346,27 @@ def root():
             "Invitations & Permissions"
         ]
     }
-
 # ========================================
 # EJECUTAR SERVIDOR
 # ========================================
 
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 INICIANDO PHOTOSITE360 BACKEND...")
-    print("📦 Cloudinary configurado")
-    print("🗑️ Limpieza automática activada")
-    print("🔐 Sistema de invitaciones activado")
-    print("🌐 Servidor en puerto 5000")
-    uvicorn.run(app, host="0.0.0.0", port=5000, reload=True)
+    import os
+    
+    # Railway usa la variable de entorno PORT
+    port = int(os.getenv("PORT", 5000))
+    
+    print("=" * 60)
+    print("🚀 INICIANDO PHOTOSITE360 BACKEND")
+    print("=" * 60)
+    print(f"📦 Cloudinary configurado: dryuzad8w")
+    print(f"🗑️ Limpieza automática activada")
+    print(f"🔐 Sistema de invitaciones activado")
+    print(f"🌐 Servidor en puerto: {port}")
+    print(f"🔄 CORS configurado para:")
+    print(f"   - http://localhost:5173 (local)")
+    print(f"   - https://photosite360-frontend.onrender.com (producción)")
+    print("=" * 60)
+    
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
