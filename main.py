@@ -169,7 +169,7 @@ security = HTTPBearer()
 # Aplicación FastAPI
 app = FastAPI(title="PhotoSite360 API")
 
-# CORS - TEMPORAL: PERMITIR TODOS LOS ORÍGENES
+# CORS - TEMPORAL: PERMITIR TODOS LOS ORIGENES
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # TEMPORAL para debugging
