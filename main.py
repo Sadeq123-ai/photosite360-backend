@@ -448,18 +448,17 @@ def invite_global_collaborator(
     db.add(invitation)
     db.commit()
     
-    # Enviar email de invitación
-    email_sent = EmailService.send_invitation_email(
-        to_email=invitee_email,
-        project_name="Colaboración Global en PhotoSite360",
-        invitation_token=token
-    )
+    # Enviar email en background
+    import threading
+    threading.Thread(
+        target=EmailService.send_invitation_email,
+        args=(invitee_email, "Colaboración Global en PhotoSite360", token)
+    ).start()
     
     return {
-        "message": "Invitación enviada",
+        "message": "Invitación creada. Email enviándose en segundo plano.",
         "invitation_id": invitation.id,
-        "expires_at": expires_at.isoformat(),
-        "email_sent": email_sent
+        "expires_at": expires_at.isoformat()
     }
 # POST /api/invitations/{token}/accept-and-login
 @app.post("/api/invitations/{token}/accept-and-login")
@@ -577,18 +576,17 @@ def invite_to_project(
     db.add(invitation)
     db.commit()
     
-    # Enviar email de invitación
-    email_sent = EmailService.send_invitation_email(
-        to_email=invitee_email,
-        project_name=project.name,
-        invitation_token=token
-    )
+    # Enviar email en background (no bloquea la respuesta)
+    import threading
+    threading.Thread(
+        target=EmailService.send_invitation_email,
+        args=(invitee_email, project.name, token)
+    ).start()
     
     return {
-        "message": "Invitación enviada",
+        "message": "Invitación creada. Email enviándose en segundo plano.",
         "invitation_id": invitation.id,
-        "expires_at": expires_at.isoformat(),
-        "email_sent": email_sent
+        "expires_at": expires_at.isoformat()
     }
 
 
