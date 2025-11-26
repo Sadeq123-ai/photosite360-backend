@@ -1,26 +1,28 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import List
 import os
 
 class EmailService:
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
-    EMAIL_USER = "sadeqalmoddai123@gmail.com"
-    EMAIL_PASSWORD = "jqyu cavi ttkl mgbz"
-    EMAIL_FROM = "PhotoSite360 <sadeqalmoddai123@gmail.com>"
+    EMAIL_USER = os.getenv("EMAIL_USER", "sadeqalmoddai123@gmail.com")
+    EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "jqyu cavi ttkl mgbz")
+    EMAIL_FROM = os.getenv("EMAIL_FROM", "PhotoSite360 <sadeqalmoddai123@gmail.com>")
     
     @staticmethod
     def send_invitation_email(
         to_email: str,
         project_name: str,
         invitation_token: str,
-        frontend_url: str = "https://photosite360-frontend.onrender.com"
+        frontend_url: str = None
     ) -> bool:
         """
         Envía email de invitación a colaborador
         """
+        if not frontend_url:
+            frontend_url = os.getenv("FRONTEND_URL", "https://photosite360-frontend.onrender.com")
+        
         try:
             # Crear mensaje
             msg = MIMEMultipart('alternative')
@@ -119,4 +121,6 @@ Si no solicitaste esta invitación, puedes ignorar este email.
             
         except Exception as e:
             print(f"❌ Error enviando email: {e}")
+            import traceback
+            traceback.print_exc()
             return False
