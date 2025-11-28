@@ -1,14 +1,10 @@
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import os
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail, Email, To, Content
 
 class EmailService:
-    SMTP_SERVER = "smtp.gmail.com"
-    SMTP_PORT = 587
-    EMAIL_USER = os.getenv("EMAIL_USER", "sadeqalmoddai123@gmail.com")
-    EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "jqyu cavi ttkl mgbz")
-    EMAIL_FROM = os.getenv("EMAIL_FROM", "PhotoSite360 <sadeqalmoddai123@gmail.com>")
+    SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
+    EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@photosite360.com")
     
     @staticmethod
     def send_invitation_email(
@@ -18,23 +14,17 @@ class EmailService:
         frontend_url: str = None
     ) -> bool:
         """
-        Envía email de invitación a colaborador
+        Envía email de invitación usando SendGrid
         """
         if not frontend_url:
             frontend_url = os.getenv("FRONTEND_URL", "https://photosite360-frontend.onrender.com")
         
         try:
-            # Crear mensaje
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = f"Invitación a proyecto: {project_name}"
-            msg['From'] = EmailService.EMAIL_FROM
-            msg['To'] = to_email
-            
             # Generar link de invitación
             invitation_link = f"{frontend_url}/invitation/{invitation_token}"
             
             # HTML del email
-            html = f"""
+            html_content = f"""
             <html>
               <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                 <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
@@ -90,37 +80,23 @@ class EmailService:
             </html>
             """
             
-            # Texto plano alternativo
-            text = f"""
-PhotoSite360 - Invitación a Proyecto
-
-Has sido invitado a colaborar en el proyecto: {project_name}
-
-Haz clic en el siguiente enlace para aceptar la invitación:
-{invitation_link}
-
-Si no solicitaste esta invitación, puedes ignorar este email.
-
-© 2025 PhotoSite360
-            """
+            # Crear mensaje
+            message = Mail(
+                from_email=Email(EmailService.EMAIL_FROM, "PhotoSite360"),
+                to_emails=To(to_email),
+                subject=f"Invitación a proyecto: {project_name}",
+                html_content=Content("text/html", html_content)
+            )
             
-            part1 = MIMEText(text, 'plain')
-            part2 = MIMEText(html, 'html')
+            # Enviar con SendGrid
+            sg = SendGridAPIClient(EmailService.SENDGRID_API_KEY)
+            response = sg.send(message)
             
-            msg.attach(part1)
-            msg.attach(part2)
-            
-            # Enviar email
-            with smtplib.SMTP(EmailService.SMTP_SERVER, EmailService.SMTP_PORT) as server:
-                server.starttls()
-                server.login(EmailService.EMAIL_USER, EmailService.EMAIL_PASSWORD)
-                server.send_message(msg)
-            
-            print(f"✅ Email enviado a {to_email}")
+            print(f"✅ Email enviado a {to_email} (Status: {response.status_code})")
             return True
             
         except Exception as e:
-            print(f"❌ Error enviando email: {e}")
+            print(f"❌ Error enviando email con SendGrid: {e}")
             import traceback
             traceback.print_exc()
             return False
