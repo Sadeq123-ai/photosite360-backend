@@ -2,6 +2,11 @@ import os
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail, Email, To, Content
 
+# ========================================
+# VERSIÓN: SENDGRID v2.0 - 2025-11-28
+# ========================================
+print("🔥 USANDO EMAIL_SERVICE CON SENDGRID v2.0")
+
 class EmailService:
     SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
     EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@photosite360.com")
