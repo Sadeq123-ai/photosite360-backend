@@ -40,15 +40,7 @@ cloudinary.config(
 )
 
 # Base de datos
-import os
-# IMPORTANTE: Usar DATABASE_URL_CUSTOM para conexión externa a PostgreSQL
-DATABASE_URL_CUSTOM = os.getenv("DATABASE_URL_CUSTOM")
-if DATABASE_URL_CUSTOM:
-    DATABASE_URL = DATABASE_URL_CUSTOM
-    print(f"✅ Usando DATABASE_URL_CUSTOM: {DATABASE_URL[:50]}...")
-else:
-    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./photosite360.db")
-    print(f"⚠️ Usando DATABASE_URL por defecto: {DATABASE_URL[:50]}...")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./photosite360.db")
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
