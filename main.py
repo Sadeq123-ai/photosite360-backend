@@ -1381,7 +1381,14 @@ async def health_check():
         "cors_configured": True,
         "database": "connected"
     }
-
+@app.get("/api/debug/database")
+def debug_database():
+    """Endpoint temporal para debugging"""
+    return {
+        "DATABASE_URL": DATABASE_URL[:80] + "...",
+        "database_type": "postgresql" if DATABASE_URL.startswith("postgresql") else "sqlite",
+        "full_url_length": len(DATABASE_URL)
+    }
 @app.get("/api/debug/cors")
 async def debug_cors(request: Request):
     return {
