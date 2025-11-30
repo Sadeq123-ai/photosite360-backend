@@ -41,7 +41,11 @@ cloudinary.config(
 
 # Base de datos
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./photosite360.db")
-print(f"🗄️ DATABASE_URL: {DATABASE_URL[:80]}...")
+print("\n" + "=" * 80)
+print("🗄️🗄️🗄️ CONFIGURACIÓN DE BASE DE DATOS 🗄️🗄️🗄️")
+print("=" * 80)
+print(f"DATABASE_URL: {DATABASE_URL}")
+print("=" * 80 + "\n")
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
