@@ -419,21 +419,38 @@ const EnhancedMapView = ({ photos = [], project, onClose, onPhotoCapture }) => {
 
     // Marcadores de fotos
     photos.forEach((photo, index) => {
-      if (!photo.latitude || !photo.longitude) return;
+      // ✅ DETECTAR SI TIENE COORDENADAS (NUEVAS O LEGACY)
+      const hasGeoCoords = photo.geo_latitude !== undefined && photo.geo_longitude !== undefined;
+      const hasLegacyCoords = photo.latitude !== undefined && photo.longitude !== undefined;
+      const hasProjectCoords = photo.project_x !== undefined && photo.project_y !== undefined;
+
+      // Si no tiene ningún tipo de coordenadas, saltar
+      if (!hasGeoCoords && !hasLegacyCoords && !hasProjectCoords) return;
 
       // ✅ DECLARAR isNormalImage FUERA del try para evitar errores
-      const isNormalImage = photo.type === 'normal';
-      
+      const isNormalImage = photo.type === 'normal' || photo.object_type === 'image';
+
       try {
         let photoLatLng;
-        
-        if (photo.type === 'normal' && photo.realLocation) {
-          // Imágenes normales con ubicación real
+
+        // ✅ NUEVA LÓGICA: Priorizar geo_latitude/geo_longitude (coordenadas reales)
+        if (hasGeoCoords) {
+          // Imágenes con coordenadas geográficas reales (nuevo sistema)
+          photoLatLng = [photo.geo_latitude, photo.geo_longitude];
+        } else if (photo.type === 'normal' && photo.realLocation) {
+          // Imágenes normales con ubicación real (legacy)
           photoLatLng = [photo.realLocation.lat, photo.realLocation.lng];
-        } else {
-          // Fotos 360° con coordenadas del proyecto
+        } else if (hasProjectCoords && projectOrigin) {
+          // Convertir coordenadas del proyecto a reales usando origen y rotación
+          const currentRotation = isRotating ? tempRotation : projectRotation;
+          photoLatLng = convertToRealLatLng(photo.project_x, photo.project_y, currentRotation);
+        } else if (hasLegacyCoords && projectOrigin) {
+          // Fotos 360° con coordenadas del proyecto (legacy)
           const currentRotation = isRotating ? tempRotation : projectRotation;
           photoLatLng = convertToRealLatLng(photo.latitude, photo.longitude, currentRotation);
+        } else {
+          // Sin coordenadas válidas, saltar
+          return;
         }
         
         const markerNumber = index + 1;

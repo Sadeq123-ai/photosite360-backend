@@ -42,12 +42,24 @@ const CameraMarker = ({ photo, onClick, isActive }) => {
   const arrowRef = useRef()
   const [hovered, setHovered] = useState(false)
 
-  const x = parseFloat(photo.latitude) || 0
-  const y = parseFloat(photo.longitude) || 0
-  const z = parseFloat(photo.description?.match(/z:([-\d.]+)/)?.[1] || 0)
+  // ✅ DETECTAR TIPO DE FOTO Y COORDENADAS
+  const isNormalImage = photo.type === 'normal' || photo.object_type === 'image'
 
-  // Obtener orientación
-  const orientation = getOrientation(photo)
+  // Priorizar project_x, project_y, project_z (nuevo sistema)
+  let x, y, z
+  if (photo.project_x !== undefined && photo.project_y !== undefined) {
+    x = parseFloat(photo.project_x) || 0
+    y = parseFloat(photo.project_y) || 0
+    z = parseFloat(photo.project_z) || 0
+  } else {
+    // Legacy: usar latitude/longitude para fotos 360
+    x = parseFloat(photo.latitude) || 0
+    y = parseFloat(photo.longitude) || 0
+    z = parseFloat(photo.description?.match(/z:([-\d.]+)/)?.[1] || 0)
+  }
+
+  // Obtener orientación (solo para fotos 360°)
+  const orientation = isNormalImage ? null : getOrientation(photo)
 
   useFrame(() => {
     if (meshRef.current && hovered) {
@@ -57,7 +69,7 @@ const CameraMarker = ({ photo, onClick, isActive }) => {
 
   return (
     <group position={[x, z, y]}>
-      {/* Cono/cámara principal */}
+      {/* Marcador diferente según tipo */}
       <mesh
         ref={meshRef}
         onClick={(e) => {
@@ -74,9 +86,14 @@ const CameraMarker = ({ photo, onClick, isActive }) => {
         }}
         rotation={orientation ? [orientation.pitch, orientation.yaw, orientation.roll] : [0, 0, 0]}
       >
-        <coneGeometry args={[0.5, 1.5, 4]} />
-        <meshStandardMaterial 
-          color={isActive ? '#10b981' : hovered ? '#667eea' : '#4a5568'} 
+        {/* ✅ Foto 360: Cono (cámara) | Imagen normal: Esfera */}
+        {isNormalImage ? (
+          <sphereGeometry args={[0.6, 16, 16]} />
+        ) : (
+          <coneGeometry args={[0.5, 1.5, 4]} />
+        )}
+        <meshStandardMaterial
+          color={isActive ? '#10b981' : hovered ? '#667eea' : isNormalImage ? '#f59e0b' : '#4a5568'}
           emissive={isActive ? '#10b981' : hovered ? '#667eea' : '#000000'}
           emissiveIntensity={0.5}
         />
@@ -189,7 +206,14 @@ const Scene = ({ photos, onPhotoClick, activePhotoId }) => {
 }
 
 const CameraMap3D = ({ photos, onPhotoClick, activePhotoId, onClose, embedded = false }) => {
-  const photosWithCoords = photos.filter(p => p.latitude && p.longitude)
+  // ✅ FILTRAR FOTOS CON COORDENADAS (LEGACY O NUEVO SISTEMA)
+  const photosWithCoords = photos.filter(p => {
+    // Tiene coordenadas del proyecto (nuevo sistema)
+    const hasProjectCoords = p.project_x !== undefined && p.project_y !== undefined
+    // Tiene coordenadas legacy (fotos 360 antiguas)
+    const hasLegacyCoords = p.latitude !== undefined && p.longitude !== undefined
+    return hasProjectCoords || hasLegacyCoords
+  })
 
   if (embedded) {
     return (
@@ -233,7 +257,11 @@ const CameraMap3D = ({ photos, onPhotoClick, activePhotoId, onClose, embedded = 
       <div className="camera-map-legend">
         <div className="legend-item">
           <div className="legend-icon" style={{background: '#4a5568'}}></div>
-          <span>Cámara</span>
+          <span>Foto 360° (Cono)</span>
+        </div>
+        <div className="legend-item">
+          <div className="legend-icon" style={{background: '#f59e0b'}}></div>
+          <span>Imagen Normal (Esfera)</span>
         </div>
         <div className="legend-item">
           <div className="legend-icon" style={{background: '#667eea'}}></div>
@@ -242,10 +270,6 @@ const CameraMap3D = ({ photos, onPhotoClick, activePhotoId, onClose, embedded = 
         <div className="legend-item">
           <div className="legend-icon" style={{background: '#10b981'}}></div>
           <span>Activa</span>
-        </div>
-        <div className="legend-item">
-          <div className="legend-icon" style={{background: '#f59e0b'}}></div>
-          <span>Dirección</span>
         </div>
       </div>
 

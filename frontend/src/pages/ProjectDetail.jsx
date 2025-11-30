@@ -316,7 +316,15 @@ const ProjectDetail = () => {
     return [...photos360, ...normalPhotos];
   };
 
-  const photosWithCoords = photos.filter(p => p.latitude && p.longitude);
+  // ✅ FILTRAR TODAS LAS FOTOS/IMÁGENES CON COORDENADAS (360° + NORMALES)
+  const allPhotosForMap = getAllPhotosForMap();
+  const photosWithCoords = allPhotosForMap.filter(p => {
+    // Tiene coordenadas del proyecto (nuevo sistema)
+    const hasProjectCoords = p.project_x !== undefined && p.project_y !== undefined;
+    // Tiene coordenadas legacy (fotos 360 antiguas)
+    const hasLegacyCoords = p.latitude !== undefined && p.longitude !== undefined;
+    return hasProjectCoords || hasLegacyCoords;
+  });
 
   if (loading) {
     return (
@@ -429,7 +437,7 @@ const ProjectDetail = () => {
             </div>
             <div className="viewer-3d-container">
               <CameraMap3D
-                photos={photos}
+                photos={getAllPhotosForMap()}
                 onPhotoClick={handlePhotoClick}
                 embedded={true}
               />
@@ -514,7 +522,7 @@ const ProjectDetail = () => {
       {/* Modal mapa 3D en pantalla completa */}
       {show3DMapFullscreen && (
         <CameraMap3D
-          photos={photos}
+          photos={getAllPhotosForMap()}
           onPhotoClick={handlePhotoClick}
           onClose={() => setShow3DMapFullscreen(false)}
         />
