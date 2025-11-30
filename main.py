@@ -365,63 +365,33 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/api/auth/login", response_model=Token)
 def login(user: UserLogin, db: Session = Depends(get_db)):
+    print(f"🔐 Intento de login: {user.email}")
+    
     db_user = db.query(User).filter(User.email == user.email).first()
-    if not db_user or not verify_password(user.password, db_user.hashed_password):
+    
+    if not db_user:
+        print(f"❌ Usuario no encontrado: {user.email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
     
+    print(f"✅ Usuario encontrado: ID={db_user.id}, Email={db_user.email}")
+    print(f"🔑 Hash almacenado: {db_user.hashed_password[:50]}...")
+    
+    is_valid = verify_password(user.password, db_user.hashed_password)
+    print(f"🔍 ¿Password válido?: {is_valid}")
+    
+    if not is_valid:
+        print(f"❌ Password incorrecto para {user.email}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+    
+    print(f"✅ Login exitoso para {user.email}")
     access_token = create_access_token(data={"sub": db_user.email})
     return {"access_token": access_token, "token_type": "bearer"}
-
-@app.get("/api/me")
-def get_me(current_user: User = Depends(get_current_user)):
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "full_name": current_user.full_name,
-        "username": current_user.username
-    }
-
-# ============================================
-# RUTAS DE INVITACIONES
-# ============================================
-
-# GET /api/invitations/pending
-@app.get("/api/invitations/pending")
-def get_pending_invitations(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Obtener invitaciones pendientes del usuario actual"""
-    invitations = db.query(Invitation).filter(
-        Invitation.invitee_email == current_user.email,
-        Invitation.status == "PENDING",
-        Invitation.expires_at > datetime.utcnow()
-    ).all()
-    
-    result = []
-    for inv in invitations:
-        inviter = db.query(User).filter(User.id == inv.inviter_id).first()
-        project_name = None
-        if inv.project_id:
-            project = db.query(Project).filter(Project.id == inv.project_id).first()
-            project_name = project.name if project else None
-        
-        result.append({
-            "id": inv.id,
-            "token": inv.token,
-            "inviter_name": inviter.full_name if inviter else "Unknown",
-            "project_name": project_name,
-            "permission_level": inv.permission_level,
-            "message": inv.message,
-            "created_at": inv.created_at.isoformat(),
-            "expires_at": inv.expires_at.isoformat()
-        })
-    
-    return result
-
 # POST /api/invitations/invite-global
 @app.post("/api/invitations/invite-global")
 def invite_global_collaborator(
