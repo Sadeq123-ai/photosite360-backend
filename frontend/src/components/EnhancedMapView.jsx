@@ -190,13 +190,24 @@ const EnhancedMapView = ({ photos = [], project, onClose, onPhotoCapture }) => {
   const handleMobileCaptureSave = useCallback(async (imageData) => {
     try {
       console.log('💾 Guardando imagen con coordenadas:', imageData);
-      
-      // ✅ CALCULAR COORDENADAS DEL PROYECTO
-      const projectCoords = convertRealToProjectCoords(
-        imageData.latitude, 
-        imageData.longitude
-      );
-      
+
+      // ✅ CALCULAR TODAS LAS COORDENADAS (WGS84, UTM, PROYECTO)
+      const lat = imageData.latitude;
+      const lng = imageData.longitude;
+
+      // Coordenadas del proyecto (locales)
+      const projectCoords = convertRealToProjectCoords(lat, lng);
+
+      // Coordenadas UTM
+      const utm = CoordinateService.wgs84ToUTM(lat, lng);
+      const zoneInfo = CoordinateService.detectUTMZone(lat, lng);
+
+      console.log('📐 Coordenadas calculadas:', {
+        wgs84: { lat, lng },
+        utm: utm,
+        project: projectCoords
+      });
+
       // ✅ SI ES PORTÁTIL: Subir a Cloudinary
       if (selectedImageForMap && !imageData.file) {
         const formData = new FormData();
@@ -207,7 +218,7 @@ const EnhancedMapView = ({ photos = [], project, onClose, onPhotoCapture }) => {
           method: 'POST',
           body: formData
         });
-        
+
         const cloudinaryData = await cloudinaryResponse.json();
 
         if (cloudinaryData.secure_url) {
@@ -217,36 +228,49 @@ const EnhancedMapView = ({ photos = [], project, onClose, onPhotoCapture }) => {
             url: cloudinaryData.secure_url,
             latitude: mobileCapturePosition.lat,
             longitude: mobileCapturePosition.lng,
-            // ✅ AÑADIR COORDENADAS DEL PROYECTO
-            projectX: projectCoords.x,
-            projectY: projectCoords.y,
-            projectZ: imageData.finalZ || 0,
             filename: selectedImageForMap.name,
             uploaded_at: new Date().toISOString(),
             type: 'normal',
-            // ✅ MARCADOR EDITABLE
             editable: true
           };
         }
       }
 
-      // ✅ AÑADIR COORDENADAS A TODAS LAS IMÁGENES
+      // ✅ AÑADIR TODAS LAS COORDENADAS A LA IMAGEN
       imageData = {
         ...imageData,
+        // Coordenadas geográficas WGS84
+        geo_latitude: lat,
+        geo_longitude: lng,
+        // Coordenadas UTM
+        utm_easting: utm?.easting,
+        utm_northing: utm?.northing,
+        utm_zone: utm?.zone,
+        utm_hemisphere: zoneInfo?.hemisphere,
+        utm_datum: utm?.datum || 'ETRS89',
+        // Coordenadas del proyecto (locales)
         projectX: projectCoords.x,
         projectY: projectCoords.y,
         projectZ: imageData.finalZ || 0,
-        editable: true
+        project_x: projectCoords.x,
+        project_y: projectCoords.y,
+        project_z: imageData.finalZ || 0,
+        // Marcador editable
+        editable: true,
+        // Tipo de objeto
+        object_type: 'image'
       };
+
+      console.log('📦 Datos finales a guardar:', imageData);
 
       if (onPhotoCapture) {
         await onPhotoCapture(imageData);
       }
-      
-      showNotification(`✅ Imagen guardada - X:${projectCoords.x}, Y:${projectCoords.y}, Z:${imageData.finalZ || 0}`);
+
+      showNotification(`✅ Imagen guardada\nUTM: ${utm?.easting?.toFixed(0)}E, ${utm?.northing?.toFixed(0)}N\nProyecto: X:${projectCoords.x}, Y:${projectCoords.y}, Z:${imageData.finalZ || 0}`);
       setShowMobileCapture(false);
       setSelectedImageForMap(null);
-      
+
     } catch (error) {
       console.error('❌ Error guardando imagen:', error);
       showNotification('❌ Error al guardar la imagen', 'error');

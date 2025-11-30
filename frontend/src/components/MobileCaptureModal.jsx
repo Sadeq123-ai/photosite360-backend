@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './MobileCaptureModal.css';
+import CoordinateService from '../services/coordinateService';
 
 const MobileCaptureModal = ({ position, onSave, onClose, selectedImage, levels = [] }) => {
     const [capturedImage, setCapturedImage] = useState(selectedImage || null);
@@ -295,12 +296,27 @@ const MobileCaptureModal = ({ position, onSave, onClose, selectedImage, levels =
                     </div>
                 </div>
 
-                {/* ✅ INFORMACIÓN DE UBICACIÓN */}
+                {/* ✅ INFORMACIÓN DE UBICACIÓN CON UTM */}
                 <div className="location-info">
                     <h4>📍 Ubicación Seleccionada</h4>
-                    <p>Lat: {position?.lat.toFixed(6)}</p>
-                    <p>Lng: {position?.lng.toFixed(6)}</p>
-                    <p>Z calculado: <strong>{calculateFinalZ().toFixed(2)}m</strong></p>
+                    <div className="coords-display">
+                        <p><strong>WGS84:</strong></p>
+                        <p>Lat: {position?.lat.toFixed(6)}</p>
+                        <p>Lng: {position?.lng.toFixed(6)}</p>
+
+                        {position && (() => {
+                            const utm = CoordinateService.wgs84ToUTM(position.lat, position.lng);
+                            return utm && (
+                                <>
+                                    <p style={{marginTop: '8px'}}><strong>UTM ({utm.datum} Zone {utm.zone}{utm.hemisphere}):</strong></p>
+                                    <p>Easting: {utm.easting.toFixed(2)}m</p>
+                                    <p>Northing: {utm.northing.toFixed(2)}m</p>
+                                </>
+                            );
+                        })()}
+
+                        <p style={{marginTop: '8px'}}><strong>Coordenada Z:</strong> {calculateFinalZ().toFixed(2)}m</p>
+                    </div>
                 </div>
 
                 {/* ✅ BOTONES DE ACCIÓN */}

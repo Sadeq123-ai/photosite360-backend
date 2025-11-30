@@ -249,21 +249,50 @@ const ProjectDetail = () => {
       formData.append('room', photoData.room || '');
       formData.append('pk', photoData.pk || '');
       formData.append('comment', photoData.comment || '');
-      
-      // Coordenadas geográficas
-      if (photoData.latitude && photoData.longitude) {
+
+      // ✅ Coordenadas geográficas WGS84
+      if (photoData.geo_latitude !== undefined && photoData.geo_longitude !== undefined) {
+        formData.append('geo_latitude', photoData.geo_latitude.toString());
+        formData.append('geo_longitude', photoData.geo_longitude.toString());
+      } else if (photoData.latitude && photoData.longitude) {
+        // Backward compatibility
         formData.append('latitude', photoData.latitude.toString());
         formData.append('longitude', photoData.longitude.toString());
       }
-      
-      // Coordenadas del proyecto (X,Y,Z)
-      if (photoData.projectX !== undefined) {
+
+      // ✅ Coordenadas UTM
+      if (photoData.utm_easting !== undefined) {
+        formData.append('utm_easting', photoData.utm_easting.toString());
+      }
+      if (photoData.utm_northing !== undefined) {
+        formData.append('utm_northing', photoData.utm_northing.toString());
+      }
+      if (photoData.utm_zone !== undefined) {
+        formData.append('utm_zone', photoData.utm_zone.toString());
+      }
+      if (photoData.utm_hemisphere) {
+        formData.append('utm_hemisphere', photoData.utm_hemisphere);
+      }
+      if (photoData.utm_datum) {
+        formData.append('utm_datum', photoData.utm_datum);
+      }
+
+      // ✅ Coordenadas del proyecto (locales X,Y,Z)
+      if (photoData.project_x !== undefined) {
+        formData.append('project_x', photoData.project_x.toString());
+      } else if (photoData.projectX !== undefined) {
         formData.append('project_x', photoData.projectX.toString());
       }
-      if (photoData.projectY !== undefined) {
+
+      if (photoData.project_y !== undefined) {
+        formData.append('project_y', photoData.project_y.toString());
+      } else if (photoData.projectY !== undefined) {
         formData.append('project_y', photoData.projectY.toString());
       }
-      if (photoData.projectZ !== undefined) {
+
+      if (photoData.project_z !== undefined) {
+        formData.append('project_z', photoData.project_z.toString());
+      } else if (photoData.projectZ !== undefined) {
         formData.append('project_z', photoData.projectZ.toString());
       }
 
