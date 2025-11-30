@@ -346,10 +346,14 @@ const ProjectDetail = () => {
   const allPhotosForMap = getAllPhotosForMap();
   const photosWithCoords = allPhotosForMap.filter(p => {
     // Tiene coordenadas del proyecto (nuevo sistema)
-    const hasProjectCoords = p.project_x !== undefined && p.project_y !== undefined;
-    // Tiene coordenadas legacy (fotos 360 antiguas)
-    const hasLegacyCoords = p.latitude !== undefined && p.longitude !== undefined;
-    return hasProjectCoords || hasLegacyCoords;
+    const hasProjectCoords = p.project_x !== undefined && p.project_x !== null && p.project_y !== undefined && p.project_y !== null;
+    // Tiene coordenadas legacy (fotos 360 antiguas) - verificar que no sean null, undefined o strings vacíos
+    const hasLegacyCoords = (p.latitude !== undefined && p.latitude !== null && p.latitude !== '' &&
+                             p.longitude !== undefined && p.longitude !== null && p.longitude !== '');
+    // Tiene coordenadas geo (nuevo sistema)
+    const hasGeoCoords = p.geo_latitude !== undefined && p.geo_latitude !== null &&
+                         p.geo_longitude !== undefined && p.geo_longitude !== null;
+    return hasProjectCoords || hasLegacyCoords || hasGeoCoords;
   });
 
   if (loading) {
