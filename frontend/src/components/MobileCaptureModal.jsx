@@ -108,56 +108,55 @@ const MobileCaptureModal = ({ position, onSave, onClose, selectedImage, levels =
         const imageFile = capturedImage || selectedImage;
         if (!imageFile) return;
 
-        // Subir imagen a Cloudinary
-        const uploadToCloudinary = async (file) => {
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('upload_preset', 'photosite360');
+        // ✅ CALCULAR Z FINAL
+        const finalZ = calculateFinalZ();
 
-            try {
-                const response = await fetch('https://api.cloudinary.com/v1_1/dryuzad8w/image/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                return await response.json();
-            } catch (error) {
-                console.error('Error subiendo a Cloudinary:', error);
-                return null;
-            }
+        // ✅ CALCULAR COORDENADAS COMPLETAS (WGS84, UTM, PROYECTO)
+        const geoLat = position.lat;
+        const geoLng = position.lng;
+
+        // Calcular coordenadas UTM
+        const utmCoords = CoordinateService.wgs84ToUTM(geoLat, geoLng);
+        const zoneInfo = CoordinateService.detectUTMZone(geoLat, geoLng);
+
+        // Preparar datos para guardar (el backend subirá a Cloudinary)
+        const imageData = {
+            file: imageFile,
+            latitude: geoLat,
+            longitude: geoLng,
+            // ✅ COORDENADAS GEOGRÁFICAS WGS84
+            geo_latitude: geoLat,
+            geo_longitude: geoLng,
+            // ✅ COORDENADAS UTM
+            utm_easting: utmCoords?.easting,
+            utm_northing: utmCoords?.northing,
+            utm_zone: utmCoords?.zone,
+            utm_hemisphere: zoneInfo?.hemisphere,
+            utm_datum: utmCoords?.datum || 'ETRS89',
+            // ✅ COORDENADAS DEL PROYECTO (se calcularán en ProjectDetail)
+            // project_x, project_y se calcularán en handleMobileCaptureSubmit
+            project_z: finalZ,
+            // Metadatos
+            level: level,
+            room: room,
+            pk: pk,
+            comment: comment,
+            filename: imageFile.name,
+            uploaded_at: new Date().toISOString(),
+            title: `Imagen ${new Date().toLocaleString()}`,
+            tags: [level, room, pk].filter(Boolean).join(', '),
+            type: 'normal',
+            object_type: 'image',
+            // ✅ CAMPOS ADICIONALES PARA Z
+            finalZ: finalZ,
+            zType: zType,
+            customZ: customZ,
+            // ✅ INDICAR QUE ES EDITABLE/MOVIBLE
+            editable: true
         };
 
-        const cloudinaryResult = await uploadToCloudinary(imageFile);
-        
-        if (cloudinaryResult) {
-            // ✅ CALCULAR Z FINAL
-            const finalZ = calculateFinalZ();
-            
-            // Preparar datos para guardar
-            const imageData = {
-                file: imageFile,
-                url: cloudinaryResult.secure_url,
-                latitude: position.lat,
-                longitude: position.lng,
-                level: level,
-                room: room,
-                pk: pk,
-                comment: comment,
-                filename: imageFile.name,
-                uploaded_at: new Date().toISOString(),
-                title: `Imagen ${new Date().toLocaleString()}`,
-                tags: [level, room, pk].filter(Boolean).join(', '),
-                type: 'normal',
-                // ✅ NUEVOS CAMPOS PARA COORDENADAS Z
-                finalZ: finalZ,
-                zType: zType,
-                customZ: customZ,
-                // ✅ INDICAR QUE ES EDITABLE/MOVIBLE
-                editable: true
-            };
-
-            // Llamar función padre para guardar
-            onSave(imageData);
-        }
+        // Llamar función padre para guardar (envía al backend)
+        onSave(imageData);
     };
 
     return (

@@ -5,6 +5,7 @@ import './EnhancedMapView.css';
 import MobileCaptureModal from './MobileCaptureModal';
 import LevelManager from './LevelManager';
 import CoordinateService from '../services/coordinateService';
+import api from '../config/axios';
 
 // Fix para iconos de Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -351,6 +352,10 @@ const EnhancedMapView = ({ photos = [], project, onClose, onPhotoCapture }) => {
   const updateMarkers = useCallback(() => {
     if (!mapInstance.current) return;
 
+    console.log('[MAP DEBUG] updateMarkers llamado');
+    console.log('[MAP DEBUG] Total fotos recibidas:', photos.length);
+    console.log('[MAP DEBUG] Primeras 3 fotos:', photos.slice(0, 3));
+
     // Limpiar marcadores anteriores
     markersRef.current.forEach(marker => {
       if (marker && mapInstance.current) {
@@ -418,14 +423,35 @@ const EnhancedMapView = ({ photos = [], project, onClose, onPhotoCapture }) => {
     }
 
     // Marcadores de fotos
+    console.log('[MAP DEBUG] Iterando sobre fotos para crear marcadores...');
+    let markersCreated = 0;
+    let photosSkipped = 0;
+
     photos.forEach((photo, index) => {
       // ✅ DETECTAR SI TIENE COORDENADAS (NUEVAS O LEGACY)
-      const hasGeoCoords = photo.geo_latitude !== undefined && photo.geo_longitude !== undefined;
-      const hasLegacyCoords = photo.latitude !== undefined && photo.longitude !== undefined;
-      const hasProjectCoords = photo.project_x !== undefined && photo.project_y !== undefined;
+      const hasGeoCoords = photo.geo_latitude !== undefined && photo.geo_latitude !== null &&
+                           photo.geo_longitude !== undefined && photo.geo_longitude !== null;
+      const hasLegacyCoords = photo.latitude !== undefined && photo.latitude !== null &&
+                              photo.longitude !== undefined && photo.longitude !== null;
+      const hasProjectCoords = photo.project_x !== undefined && photo.project_x !== null &&
+                               photo.project_y !== undefined && photo.project_y !== null;
+
+      console.log(`[MAP DEBUG] Foto ${index + 1}:`, {
+        id: photo.id,
+        title: photo.title,
+        hasGeoCoords,
+        hasLegacyCoords,
+        hasProjectCoords,
+        geo_latitude: photo.geo_latitude,
+        geo_longitude: photo.geo_longitude
+      });
 
       // Si no tiene ningún tipo de coordenadas, saltar
-      if (!hasGeoCoords && !hasLegacyCoords && !hasProjectCoords) return;
+      if (!hasGeoCoords && !hasLegacyCoords && !hasProjectCoords) {
+        photosSkipped++;
+        console.log(`[MAP DEBUG] Foto ${index + 1} saltada: sin coordenadas`);
+        return;
+      }
 
       // ✅ DECLARAR isNormalImage FUERA del try para evitar errores
       const isNormalImage = photo.type === 'normal' || photo.object_type === 'image';
@@ -450,9 +476,20 @@ const EnhancedMapView = ({ photos = [], project, onClose, onPhotoCapture }) => {
           photoLatLng = convertToRealLatLng(photo.latitude, photo.longitude, currentRotation);
         } else {
           // Sin coordenadas válidas, saltar
+          photosSkipped++;
+          console.log(`[MAP DEBUG] Foto ${index + 1} saltada: no se pudo calcular photoLatLng`);
           return;
         }
-        
+
+        // Verificar que photoLatLng sea válido antes de continuar
+        if (!photoLatLng || !Array.isArray(photoLatLng) || photoLatLng.length !== 2 ||
+            photoLatLng[0] === null || photoLatLng[1] === null ||
+            isNaN(photoLatLng[0]) || isNaN(photoLatLng[1])) {
+          photosSkipped++;
+          console.log(`[MAP DEBUG] Foto ${index + 1} saltada: photoLatLng inválido`, photoLatLng);
+          return;
+        }
+
         const markerNumber = index + 1;
         
         const photoIcon = L.divIcon({
@@ -521,17 +558,35 @@ const EnhancedMapView = ({ photos = [], project, onClose, onPhotoCapture }) => {
         }
 
         markersRef.current.push(marker);
+        markersCreated++;
+        console.log(`[MAP DEBUG] Marcador creado para foto ${index + 1} en:`, photoLatLng);
 
       } catch (error) {
-        console.error('Error creando marcador para foto:', error, photo);
+        console.error('[MAP DEBUG] Error creando marcador para foto:', error, photo);
         // Continuar con la siguiente foto sin bloquear toda la función
       }
     });
 
+    console.log(`[MAP DEBUG] Resumen: ${markersCreated} marcadores creados, ${photosSkipped} fotos saltadas`);
+    console.log(`[MAP DEBUG] Total marcadores en mapa: ${markersRef.current.length}`);
+
     // Ajustar vista si hay marcadores
     if (markersRef.current.length > 0 && mapInstance.current) {
       const group = L.featureGroup(markersRef.current);
-      mapInstance.current.fitBounds(group.getBounds().pad(0.1));
+      const bounds = group.getBounds();
+      console.log('[MAP DEBUG] Bounds del mapa:', {
+        norte: bounds.getNorth(),
+        sur: bounds.getSouth(),
+        este: bounds.getEast(),
+        oeste: bounds.getWest(),
+        centro: bounds.getCenter()
+      });
+      mapInstance.current.fitBounds(bounds.pad(0.1));
+      console.log('[MAP DEBUG] Vista ajustada a los marcadores');
+      console.log('[MAP DEBUG] Centro del mapa:', mapInstance.current.getCenter());
+      console.log('[MAP DEBUG] Zoom del mapa:', mapInstance.current.getZoom());
+    } else {
+      console.log('[MAP DEBUG] No hay marcadores para ajustar la vista');
     }
   }, [photos, project, projectOrigin, projectRotation, isRotating, tempRotation, mapMode, convertToRealLatLng, makeMarkerEditable]);
 
@@ -587,14 +642,73 @@ const EnhancedMapView = ({ photos = [], project, onClose, onPhotoCapture }) => {
 
   // Efectos para persistencia
   useEffect(() => {
-    if (projectOrigin) {
-      localStorage.setItem(`project_origin_${project?.id}`, JSON.stringify(projectOrigin));
+    if (projectOrigin && project?.id) {
+      // Guardar en localStorage
+      localStorage.setItem(`project_origin_${project.id}`, JSON.stringify(projectOrigin));
+
+      // Guardar en backend
+      const saveToBackend = async () => {
+        try {
+          await api.put(`/projects/${project.id}`, {
+            map_origin_lat: projectOrigin[0],
+            map_origin_lng: projectOrigin[1]
+          });
+          console.log('[MAP] Origen del proyecto guardado en backend');
+        } catch (error) {
+          console.error('[MAP] Error guardando origen en backend:', error);
+        }
+      };
+      saveToBackend();
     }
   }, [projectOrigin, project?.id]);
 
   useEffect(() => {
-    localStorage.setItem(`project_rotation_${project?.id}`, projectRotation.toString());
+    if (project?.id) {
+      // Guardar en localStorage
+      localStorage.setItem(`project_rotation_${project.id}`, projectRotation.toString());
+
+      // Guardar en backend
+      const saveToBackend = async () => {
+        try {
+          await api.put(`/projects/${project.id}`, {
+            map_rotation: projectRotation
+          });
+          console.log('[MAP] Rotación del proyecto guardada en backend');
+        } catch (error) {
+          console.error('[MAP] Error guardando rotación en backend:', error);
+        }
+      };
+      saveToBackend();
+    }
   }, [projectRotation, project?.id]);
+
+  // ✅ Cargar origen y rotación del backend al montar
+  useEffect(() => {
+    const loadFromBackend = async () => {
+      if (!project?.id) return;
+
+      try {
+        const response = await api.get(`/projects/${project.id}`);
+        const projectData = response.data;
+
+        // Actualizar origen si existe en backend
+        if (projectData.map_origin_lat && projectData.map_origin_lng) {
+          setProjectOrigin([projectData.map_origin_lat, projectData.map_origin_lng]);
+          console.log('[MAP] Origen cargado desde backend:', projectData.map_origin_lat, projectData.map_origin_lng);
+        }
+
+        // Actualizar rotación si existe en backend
+        if (projectData.map_rotation !== null && projectData.map_rotation !== undefined) {
+          setProjectRotation(projectData.map_rotation);
+          console.log('[MAP] Rotación cargada desde backend:', projectData.map_rotation);
+        }
+      } catch (error) {
+        console.error('[MAP] Error cargando configuración del mapa desde backend:', error);
+      }
+    };
+
+    loadFromBackend();
+  }, [project?.id]); // Solo ejecutar al montar o cambiar proyecto
 
   // ✅ FUNCIÓN MEJORADA: Ubicación en tiempo real
   const locateUser = useCallback(() => {

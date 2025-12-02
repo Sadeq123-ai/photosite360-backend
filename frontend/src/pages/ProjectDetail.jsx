@@ -3,18 +3,19 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import CameraMap3D from '../components/CameraMap3D';
 import EnhancedMapView from '../components/EnhancedMapView';
+import ProfessionalMapView from '../components/ProfessionalMapView';
 import api from '../config/axios';
 import toast from 'react-hot-toast';
-import { 
-  ArrowLeft, 
-  Upload, 
-  Image as ImageIcon, 
-  Eye, 
-  Maximize2, 
-  Link2, 
-  Download, 
-  Trash2, 
-  Map 
+import {
+  ArrowLeft,
+  Upload,
+  Image as ImageIcon,
+  Eye,
+  Maximize2,
+  Link2,
+  Download,
+  Trash2,
+  Map
 } from 'lucide-react';
 import './ProjectDetail.css';
 
@@ -28,6 +29,7 @@ const ProjectDetail = () => {
   const [uploading, setUploading] = useState(false);
   const [show3DMapFullscreen, setShow3DMapFullscreen] = useState(false);
   const [showEnhancedMap, setShowEnhancedMap] = useState(false);
+  const [showProfessionalMap, setShowProfessionalMap] = useState(false);
   const [showFileImport, setShowFileImport] = useState(false);
 
   useEffect(() => {
@@ -239,7 +241,14 @@ const ProjectDetail = () => {
   // ✅ FUNCIÓN: Manejar captura de imágenes desde el mapa
   const handlePhotoCapture = async (photoData) => {
     try {
-      console.log('📸 Captura móvil:', photoData);
+      console.log('📸 Captura móvil - photoData completo:', photoData);
+      console.log('📍 Coordenadas recibidas:', {
+        geo_latitude: photoData.geo_latitude,
+        geo_longitude: photoData.geo_longitude,
+        utm_easting: photoData.utm_easting,
+        utm_northing: photoData.utm_northing,
+        project_z: photoData.project_z
+      });
 
       const formData = new FormData();
       formData.append('file', photoData.file);
@@ -251,13 +260,22 @@ const ProjectDetail = () => {
       formData.append('comment', photoData.comment || '');
 
       // ✅ Coordenadas geográficas WGS84
+      let geoLat, geoLng;
       if (photoData.geo_latitude !== undefined && photoData.geo_longitude !== undefined) {
-        formData.append('geo_latitude', photoData.geo_latitude.toString());
-        formData.append('geo_longitude', photoData.geo_longitude.toString());
+        geoLat = photoData.geo_latitude;
+        geoLng = photoData.geo_longitude;
+        formData.append('geo_latitude', geoLat.toString());
+        formData.append('geo_longitude', geoLng.toString());
+        console.log('✅ Enviando geo_latitude y geo_longitude:', geoLat, geoLng);
       } else if (photoData.latitude && photoData.longitude) {
         // Backward compatibility
-        formData.append('latitude', photoData.latitude.toString());
-        formData.append('longitude', photoData.longitude.toString());
+        geoLat = photoData.latitude;
+        geoLng = photoData.longitude;
+        formData.append('latitude', geoLat.toString());
+        formData.append('longitude', geoLng.toString());
+        console.log('✅ Enviando latitude y longitude (legacy):', geoLat, geoLng);
+      } else {
+        console.warn('⚠️ NO SE ENCONTRARON COORDENADAS GEOGRÁFICAS');
       }
 
       // ✅ Coordenadas UTM
@@ -301,8 +319,14 @@ const ProjectDetail = () => {
       });
 
       toast.success('✅ Imagen guardada en galería normal');
+
+      // Recargar las imágenes para que aparezcan en el mapa
       await fetchNormalImages();
-      
+
+      // Cerrar y reabrir el mapa para forzar la actualización
+      setShowEnhancedMap(false);
+      setTimeout(() => setShowEnhancedMap(true), 100);
+
     } catch (error) {
       console.error('❌ Error en captura móvil:', error);
       toast.error('Error al guardar la imagen capturada');
@@ -386,6 +410,15 @@ const ProjectDetail = () => {
 
           {/* Botones de acción */}
           <div className="project-actions">
+            {/* Botón Mapa Profesional - SIEMPRE VISIBLE */}
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowProfessionalMap(true)}
+            >
+              <Map size={20} />
+              🗺️ Mapa Profesional UTM
+            </button>
+
             {photosWithCoords.length > 0 && (
               <>
                 <button className="btn btn-secondary" onClick={exportToCSV}>
@@ -574,8 +607,27 @@ const ProjectDetail = () => {
         <EnhancedMapView
           photos={getAllPhotosForMap()}
           project={project}
-          onClose={() => setShowEnhancedMap(false)}
+          onClose={() => {
+            setShowEnhancedMap(false);
+            // Recargar imágenes normales por si se actualizaron coordenadas
+            fetchNormalImages();
+          }}
           onPhotoCapture={handlePhotoCapture}
+        />
+      )}
+
+      {/* Modal mapa profesional UTM */}
+      {showProfessionalMap && (
+        <ProfessionalMapView
+          project={project}
+          photos={photos}
+          normalImages={normalImages}
+          onClose={() => {
+            setShowProfessionalMap(false);
+            // Recargar datos por si se actualizaron
+            fetchPhotos();
+            fetchNormalImages();
+          }}
         />
       )}
 

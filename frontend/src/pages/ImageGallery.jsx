@@ -4,6 +4,7 @@ import Navbar from '../components/Navbar'
 import ImageUploader from '../components/ImageUploader'
 import TagManager from '../components/TagManager'
 import TagSelector from '../components/TagSelector'
+import CoordinateAssignmentModal from '../components/CoordinateAssignmentModal'
 import api from '../config/axios'
 import './ImageGallery.css'
 
@@ -19,6 +20,8 @@ const ImageGallery = () => {
   const [imageTags, setImageTags] = useState({})
   const [selectedImage, setSelectedImage] = useState(null)
   const [showImageModal, setShowImageModal] = useState(false)
+  const [showCoordinateModal, setShowCoordinateModal] = useState(false)
+  const [imageForCoordinates, setImageForCoordinates] = useState(null)
 
   // ✅ ETIQUETAS PREDEFINIDAS
   const predefinedTags = [
@@ -162,6 +165,41 @@ const ImageGallery = () => {
     alert('URL única copiada al portapapeles')
   }
 
+  // ✅ NUEVA FUNCIÓN: Abrir modal de asignación de coordenadas
+  const openCoordinateAssignment = (image) => {
+    setImageForCoordinates(image)
+    setShowCoordinateModal(true)
+  }
+
+  // ✅ NUEVA FUNCIÓN: Guardar coordenadas asignadas
+  const handleCoordinatesSave = async (coordinates) => {
+    try {
+      console.log('[COORDS] Guardando coordenadas para imagen:', imageForCoordinates.id, coordinates)
+
+      await api.put(`/projects/${id}/gallery/${imageForCoordinates.id}/coordinates`, coordinates)
+
+      // Actualizar la imagen en el estado local
+      setImages(prevImages =>
+        prevImages.map(img =>
+          img.id === imageForCoordinates.id
+            ? { ...img, ...coordinates }
+            : img
+        )
+      )
+
+      setShowCoordinateModal(false)
+      setImageForCoordinates(null)
+      alert('Coordenadas asignadas correctamente. Las imágenes ahora aparecerán en el mapa avanzado.')
+
+      // Recargar imágenes para asegurar sincronización
+      fetchImages()
+
+    } catch (error) {
+      console.error('[COORDS] Error guardando coordenadas:', error)
+      alert('Error al guardar las coordenadas. Por favor, intenta nuevamente.')
+    }
+  }
+
   if (loading) {
     return (
       <div className="loading-container">
@@ -240,7 +278,7 @@ const ImageGallery = () => {
                 </div>
                 <div className="stat-card">
                   <div className="stat-number">
-                    {images.filter(img => img.latitude && img.longitude).length}
+                    {images.filter(img => (img.geo_latitude && img.geo_longitude) || (img.latitude && img.longitude)).length}
                   </div>
                   <div className="stat-label">Con Coordenadas</div>
                 </div>
@@ -269,7 +307,7 @@ const ImageGallery = () => {
                             onClick={() => openImageModal(image)}
                           />
                           {/* Indicador de coordenadas */}
-                          {image.latitude && image.longitude && (
+                          {((image.geo_latitude && image.geo_longitude) || (image.latitude && image.longitude)) && (
                             <div className="coordinates-badge" title="Tiene coordenadas en el mapa">
                               📍
                             </div>
@@ -281,9 +319,12 @@ const ImageGallery = () => {
                           <span className="image-url">ID: {image.unique_url}</span>
                           
                           {/* Información de coordenadas */}
-                          {image.latitude && image.longitude && (
+                          {((image.geo_latitude && image.geo_longitude) || (image.latitude && image.longitude)) && (
                             <div className="coordinates-info">
-                              <small>📍 X: {image.latitude}, Y: {image.longitude}</small>
+                              <small>📍 X: {image.project_x?.toFixed(2) || image.latitude}, Y: {image.project_y?.toFixed(2) || image.longitude}</small>
+                              {image.project_z !== null && image.project_z !== undefined && (
+                                <small>, Z: {image.project_z.toFixed(2)}m</small>
+                              )}
                             </div>
                           )}
 
@@ -305,14 +346,21 @@ const ImageGallery = () => {
                           </div>
 
                           <div className="image-actions">
-                            <button 
+                            <button
                               className="btn-action"
                               onClick={() => copyUniqueUrl(image)}
                               title="Copiar URL único"
                             >
                               📋
                             </button>
-                            <button 
+                            <button
+                              className="btn-action"
+                              onClick={() => openCoordinateAssignment(image)}
+                              title={image.geo_latitude ? "Actualizar coordenadas" : "Asignar coordenadas"}
+                            >
+                              📍
+                            </button>
+                            <button
                               className="btn-action"
                               onClick={() => {
                                 const link = document.createElement('a')
@@ -324,7 +372,7 @@ const ImageGallery = () => {
                             >
                               ⬇️
                             </button>
-                            <button 
+                            <button
                               className="btn-action btn-delete"
                               onClick={() => deleteImage(image.id)}
                               title="Eliminar imagen"
@@ -359,7 +407,7 @@ const ImageGallery = () => {
       {showImageModal && selectedImage && (
         <div className="image-modal-overlay" onClick={() => setShowImageModal(false)}>
           <div className="image-modal-content" onClick={(e) => e.stopPropagation()}>
-            <button 
+            <button
               className="modal-close"
               onClick={() => setShowImageModal(false)}
             >
@@ -369,10 +417,14 @@ const ImageGallery = () => {
             <div className="image-modal-info">
               <h3>{selectedImage.filename}</h3>
               <p>ID: {selectedImage.unique_url}</p>
-              {selectedImage.latitude && selectedImage.longitude && (
-                <p>📍 Coordenadas: X: {selectedImage.latitude}, Y: {selectedImage.longitude}</p>
+              {((selectedImage.geo_latitude && selectedImage.geo_longitude) || (selectedImage.latitude && selectedImage.longitude)) && (
+                <p>📍 Coordenadas: X: {selectedImage.project_x?.toFixed(2) || selectedImage.latitude}, Y: {selectedImage.project_y?.toFixed(2) || selectedImage.longitude}
+                {selectedImage.project_z !== null && selectedImage.project_z !== undefined && (
+                  <span>, Z: {selectedImage.project_z.toFixed(2)}m</span>
+                )}
+                </p>
               )}
-              <button 
+              <button
                 className="btn btn-secondary"
                 onClick={() => copyUniqueUrl(selectedImage)}
               >
@@ -381,6 +433,19 @@ const ImageGallery = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal para asignar coordenadas */}
+      {showCoordinateModal && imageForCoordinates && (
+        <CoordinateAssignmentModal
+          image={imageForCoordinates}
+          project={project}
+          onClose={() => {
+            setShowCoordinateModal(false)
+            setImageForCoordinates(null)
+          }}
+          onSave={handleCoordinatesSave}
+        />
       )}
     </div>
   )
