@@ -659,7 +659,7 @@ async def update_photo360_coordinates(
 
     return {"message": "Coordinates updated", "photo_id": photo_id}
 
-@app.post("/api/projects/{project_id}/photos/{photo_id}/coordinates")
+@app.post("/api/projects/{project_id}/photos/{photo_id}/coordinates/upload")
 async def upload_photo_coordinates_file(
     project_id: int,
     photo_id: int,
@@ -691,36 +691,49 @@ async def upload_photo_coordinates_file(
 
         # Parsear coordenadas del archivo TXT
         # Formatos soportados:
-        # - "X: valor" o "X:valor" o "x: valor"
-        # - "Y: valor" o "Y:valor" o "y: valor"
-        # - "Z: valor" o "Z:valor" o "z: valor"
-        # - "Latitude: valor" o "Lat: valor"
-        # - "Longitude: valor" o "Lon: valor" o "Lng: valor"
+        # 1. "position = [x, y, z];" (formato Ldr Image)
+        # 2. "X: valor", "Y: valor", "Z: valor"
+        # 3. "Latitude: valor", "Longitude: valor"
 
         import re
 
-        # Intentar extraer coordenadas del proyecto (X, Y, Z)
-        x_match = re.search(r'[xX]\s*:\s*([-\d.]+)', text)
-        y_match = re.search(r'[yY]\s*:\s*([-\d.]+)', text)
-        z_match = re.search(r'[zZ]\s*:\s*([-\d.]+)', text)
+        # Formato 1: position = [x, y, z];
+        position_match = re.search(r'position\s*=\s*\[\s*([-\d.e+]+)\s*,\s*([-\d.e+]+)\s*,\s*([-\d.e+]+)\s*\]', text, re.IGNORECASE)
 
-        # Intentar extraer coordenadas geográficas (Latitude, Longitude)
-        lat_match = re.search(r'(Latitude|Lat|latitude|lat)\s*:\s*([-\d.]+)', text)
-        lon_match = re.search(r'(Longitude|Lon|Lng|longitude|lon|lng)\s*:\s*([-\d.]+)', text)
+        if position_match:
+            # Extraer X, Y, Z del formato position = [x, y, z]
+            x = float(position_match.group(1))
+            y = float(position_match.group(2))
+            z = float(position_match.group(3))
 
-        # Actualizar coordenadas del proyecto si se encontraron
-        if x_match:
-            photo.project_x = float(x_match.group(1))
-        if y_match:
-            photo.project_y = float(y_match.group(1))
-        if z_match:
-            photo.project_z = float(z_match.group(1))
+            photo.project_x = x
+            photo.project_y = y
+            photo.project_z = z
 
-        # Actualizar coordenadas geográficas si se encontraron
-        if lat_match:
-            photo.geo_latitude = float(lat_match.group(2))
-        if lon_match:
-            photo.geo_longitude = float(lon_match.group(2))
+            print(f"[TXT COORDS] Parsed position format: X={x}, Y={y}, Z={z}")
+        else:
+            # Formato 2 y 3: Intentar extraer coordenadas individuales
+            x_match = re.search(r'[xX]\s*:\s*([-\d.e+]+)', text)
+            y_match = re.search(r'[yY]\s*:\s*([-\d.e+]+)', text)
+            z_match = re.search(r'[zZ]\s*:\s*([-\d.e+]+)', text)
+
+            # Intentar extraer coordenadas geográficas (Latitude, Longitude)
+            lat_match = re.search(r'(Latitude|Lat|latitude|lat)\s*:\s*([-\d.e+]+)', text)
+            lon_match = re.search(r'(Longitude|Lon|Lng|longitude|lon|lng)\s*:\s*([-\d.e+]+)', text)
+
+            # Actualizar coordenadas del proyecto si se encontraron
+            if x_match:
+                photo.project_x = float(x_match.group(1))
+            if y_match:
+                photo.project_y = float(y_match.group(1))
+            if z_match:
+                photo.project_z = float(z_match.group(1))
+
+            # Actualizar coordenadas geográficas si se encontraron
+            if lat_match:
+                photo.geo_latitude = float(lat_match.group(2))
+            if lon_match:
+                photo.geo_longitude = float(lon_match.group(2))
 
         db.commit()
         db.refresh(photo)
