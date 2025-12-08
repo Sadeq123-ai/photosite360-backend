@@ -1376,6 +1376,222 @@ async def import_coordinates(
         print(f"[ERROR] Failed to import coordinates: {e}")
         raise HTTPException(status_code=400, detail=f"Error al importar coordenadas: {str(e)}")
 
+# ============================================================================
+# ENDPOINTS DE TRANSFORMACIÓN Y POSICIONAMIENTO DE PROYECTO
+# ============================================================================
+
+@app.put("/api/projects/{project_id}/positioning")
+async def update_project_positioning(
+    project_id: int,
+    map_origin_lat: float = Body(...),
+    map_origin_lng: float = Body(...),
+    map_rotation: float = Body(0.0),
+    recalculate_coordinates: bool = Body(True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Actualiza el origen y rotación del proyecto en el mapa
+
+    Si recalculate_coordinates=True, recalcula todas las coordenadas:
+    - Si las fotos tienen coordenadas locales → calcula UTM y Geo
+    - Si las fotos tienen coordenadas UTM → recalcula locales
+    """
+    from utils.coordinate_transforms import CoordinateTransformer
+
+    # Verificar proyecto
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.owner_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Actualizar origen y rotación
+    project.map_origin_lat = map_origin_lat
+    project.map_origin_lng = map_origin_lng
+    project.map_rotation = map_rotation
+
+    if recalculate_coordinates:
+        transformer = CoordinateTransformer()
+
+        # Obtener todas las fotos del proyecto
+        photos = db.query(Photo).filter(Photo.project_id == project_id).all()
+        gallery_images = db.query(GalleryImage).filter(GalleryImage.project_id == project_id).all()
+
+        all_items = photos + gallery_images
+        updated_count = 0
+
+        for item in all_items:
+            try:
+                # Si tiene coordenadas locales, calcular UTM y Geo
+                if item.project_x is not None and item.project_y is not None and item.coordinate_source == 'local':
+                    utm = transformer.local_to_utm(
+                        item.project_x,
+                        item.project_y,
+                        item.project_z or 0,
+                        map_origin_lat,
+                        map_origin_lng,
+                        map_rotation
+                    )
+                    item.utm_easting = utm['utm_easting']
+                    item.utm_northing = utm['utm_northing']
+                    item.utm_zone = utm['utm_zone']
+                    item.utm_hemisphere = utm['utm_hemisphere']
+                    item.utm_datum = utm['utm_datum']
+
+                    # También calcular coordenadas geográficas
+                    geo = transformer.utm_to_geo(
+                        utm['utm_easting'],
+                        utm['utm_northing'],
+                        utm['utm_zone']
+                    )
+                    item.geo_latitude = geo['geo_latitude']
+                    item.geo_longitude = geo['geo_longitude']
+
+                    updated_count += 1
+
+                # Si tiene coordenadas UTM, recalcular locales
+                elif item.utm_easting is not None and item.utm_northing is not None:
+                    local = transformer.utm_to_local(
+                        item.utm_easting,
+                        item.utm_northing,
+                        map_origin_lat,
+                        map_origin_lng,
+                        map_rotation
+                    )
+                    item.project_x = local['project_x']
+                    item.project_y = local['project_y']
+
+                    # También calcular coordenadas geográficas si no existen
+                    if item.geo_latitude is None or item.geo_longitude is None:
+                        geo = transformer.utm_to_geo(
+                            item.utm_easting,
+                            item.utm_northing,
+                            item.utm_zone or 30
+                        )
+                        item.geo_latitude = geo['geo_latitude']
+                        item.geo_longitude = geo['geo_longitude']
+
+                    updated_count += 1
+
+                # Si tiene coordenadas geográficas, calcular UTM y locales
+                elif item.geo_latitude is not None and item.geo_longitude is not None:
+                    utm = transformer.geo_to_utm(item.geo_latitude, item.geo_longitude)
+                    item.utm_easting = utm['utm_easting']
+                    item.utm_northing = utm['utm_northing']
+                    item.utm_zone = utm['utm_zone']
+                    item.utm_hemisphere = utm['utm_hemisphere']
+                    item.utm_datum = utm['utm_datum']
+
+                    local = transformer.utm_to_local(
+                        utm['utm_easting'],
+                        utm['utm_northing'],
+                        map_origin_lat,
+                        map_origin_lng,
+                        map_rotation
+                    )
+                    item.project_x = local['project_x']
+                    item.project_y = local['project_y']
+
+                    updated_count += 1
+
+            except Exception as e:
+                print(f"[WARNING] Error transforming coordinates for item {item.id}: {e}")
+
+        db.commit()
+        print(f"[POSITIONING] Project {project_id} positioned at ({map_origin_lat}, {map_origin_lng}) rotation={map_rotation}°. {updated_count} items updated")
+
+        return {
+            "message": "Posicionamiento actualizado",
+            "origin": {"lat": map_origin_lat, "lng": map_origin_lng},
+            "rotation": map_rotation,
+            "coordinates_recalculated": recalculate_coordinates,
+            "items_updated": updated_count
+        }
+
+    db.commit()
+    return {
+        "message": "Posicionamiento actualizado",
+        "origin": {"lat": map_origin_lat, "lng": map_origin_lng},
+        "rotation": map_rotation,
+        "coordinates_recalculated": False
+    }
+
+@app.post("/api/projects/{project_id}/recalculate-coordinates")
+async def recalculate_all_coordinates(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Recalcula todas las coordenadas del proyecto basándose en el origen y rotación actuales
+
+    Útil después de mover el proyecto en el mapa
+    """
+    from utils.coordinate_transforms import CoordinateTransformer
+
+    # Verificar proyecto
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.owner_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not project.map_origin_lat or not project.map_origin_lng:
+        raise HTTPException(
+            status_code=400,
+            detail="El proyecto no tiene origen definido. Configura primero el posicionamiento."
+        )
+
+    transformer = CoordinateTransformer()
+
+    # Obtener todas las fotos del proyecto
+    photos = db.query(Photo).filter(Photo.project_id == project_id).all()
+    gallery_images = db.query(GalleryImage).filter(GalleryImage.project_id == project_id).all()
+
+    all_items = photos + gallery_images
+    updated_count = 0
+    errors = []
+
+    for item in all_items:
+        try:
+            # Prioridad: local → UTM → geo
+            if item.project_x is not None and item.project_y is not None:
+                # Calcular desde locales
+                utm = transformer.local_to_utm(
+                    item.project_x,
+                    item.project_y,
+                    item.project_z or 0,
+                    project.map_origin_lat,
+                    project.map_origin_lng,
+                    project.map_rotation
+                )
+                geo = transformer.utm_to_geo(utm['utm_easting'], utm['utm_northing'], utm['utm_zone'])
+
+                item.utm_easting = utm['utm_easting']
+                item.utm_northing = utm['utm_northing']
+                item.utm_zone = utm['utm_zone']
+                item.utm_hemisphere = utm['utm_hemisphere']
+                item.utm_datum = utm['utm_datum']
+                item.geo_latitude = geo['geo_latitude']
+                item.geo_longitude = geo['geo_longitude']
+
+                updated_count += 1
+
+        except Exception as e:
+            errors.append(f"Item {item.id}: {str(e)}")
+
+    db.commit()
+
+    return {
+        "message": "Coordenadas recalculadas",
+        "total_items": len(all_items),
+        "updated": updated_count,
+        "errors": errors if errors else None
+    }
+
 print("\n" + "=" * 60)
 print("INICIANDO PHOTOSITE360 BACKEND")
 print("=" * 60)
