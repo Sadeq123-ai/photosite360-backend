@@ -30,6 +30,16 @@ load_dotenv()
 # ✅ IMPORTS DE SERVICIOS
 from services.cloudinary_service import CloudinaryService
 
+# Importaciones opcionales para coordenadas
+try:
+    import pandas as pd
+    import openpyxl
+    from utils.coordinate_transforms import CoordinateTransformer
+    COORDINATES_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  WARNING: Coordinate features disabled - {e}")
+    COORDINATES_AVAILABLE = False
+
 # Configuración
 SECRET_KEY = "tu_clave_secreta_super_segura_cambiala_en_produccion"
 ALGORITHM = "HS256"
@@ -1237,7 +1247,12 @@ async def import_coordinates(
       - 'utm': Coordenadas UTM ETRS89 (Easting, Northing, Z)
       - 'geo': Coordenadas geográficas WGS84 (Latitud, Longitud, altitud)
     """
-    import pandas as pd
+    if not COORDINATES_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Coordinate import feature temporarily unavailable. Please contact support."
+        )
+
     import io
 
     # Verificar proyecto
@@ -1397,7 +1412,11 @@ async def update_project_positioning(
     - Si las fotos tienen coordenadas locales → calcula UTM y Geo
     - Si las fotos tienen coordenadas UTM → recalcula locales
     """
-    from utils.coordinate_transforms import CoordinateTransformer
+    if not COORDINATES_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Coordinate transformation feature temporarily unavailable."
+        )
 
     # Verificar proyecto
     project = db.query(Project).filter(
@@ -1529,7 +1548,11 @@ async def recalculate_all_coordinates(
 
     Útil después de mover el proyecto en el mapa
     """
-    from utils.coordinate_transforms import CoordinateTransformer
+    if not COORDINATES_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Coordinate recalculation feature temporarily unavailable."
+        )
 
     # Verificar proyecto
     project = db.query(Project).filter(
