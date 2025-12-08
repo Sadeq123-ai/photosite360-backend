@@ -659,6 +659,89 @@ async def update_photo360_coordinates(
 
     return {"message": "Coordinates updated", "photo_id": photo_id}
 
+@app.post("/api/projects/{project_id}/photos/{photo_id}/coordinates")
+async def upload_photo_coordinates_file(
+    project_id: int,
+    photo_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Upload coordinates from TXT file for a photo"""
+    # Verificar proyecto
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.owner_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get photo
+    photo = db.query(Photo).filter(
+        Photo.id == photo_id,
+        Photo.project_id == project_id
+    ).first()
+    if not photo:
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    try:
+        # Leer contenido del archivo TXT
+        content = await file.read()
+        text = content.decode('utf-8')
+
+        # Parsear coordenadas del archivo TXT
+        # Formatos soportados:
+        # - "X: valor" o "X:valor" o "x: valor"
+        # - "Y: valor" o "Y:valor" o "y: valor"
+        # - "Z: valor" o "Z:valor" o "z: valor"
+        # - "Latitude: valor" o "Lat: valor"
+        # - "Longitude: valor" o "Lon: valor" o "Lng: valor"
+
+        import re
+
+        # Intentar extraer coordenadas del proyecto (X, Y, Z)
+        x_match = re.search(r'[xX]\s*:\s*([-\d.]+)', text)
+        y_match = re.search(r'[yY]\s*:\s*([-\d.]+)', text)
+        z_match = re.search(r'[zZ]\s*:\s*([-\d.]+)', text)
+
+        # Intentar extraer coordenadas geográficas (Latitude, Longitude)
+        lat_match = re.search(r'(Latitude|Lat|latitude|lat)\s*:\s*([-\d.]+)', text)
+        lon_match = re.search(r'(Longitude|Lon|Lng|longitude|lon|lng)\s*:\s*([-\d.]+)', text)
+
+        # Actualizar coordenadas del proyecto si se encontraron
+        if x_match:
+            photo.project_x = float(x_match.group(1))
+        if y_match:
+            photo.project_y = float(y_match.group(1))
+        if z_match:
+            photo.project_z = float(z_match.group(1))
+
+        # Actualizar coordenadas geográficas si se encontraron
+        if lat_match:
+            photo.geo_latitude = float(lat_match.group(2))
+        if lon_match:
+            photo.geo_longitude = float(lon_match.group(2))
+
+        db.commit()
+        db.refresh(photo)
+
+        print(f"[TXT COORDS] Updated photo {photo_id} from file: Project({photo.project_x},{photo.project_y},{photo.project_z}), Geo({photo.geo_latitude},{photo.geo_longitude})")
+
+        return {
+            "message": "Coordinates updated from file",
+            "photo_id": photo_id,
+            "coordinates": {
+                "project_x": photo.project_x,
+                "project_y": photo.project_y,
+                "project_z": photo.project_z,
+                "geo_latitude": photo.geo_latitude,
+                "geo_longitude": photo.geo_longitude
+            }
+        }
+    except Exception as e:
+        print(f"[ERROR] Failed to parse coordinates file: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to parse coordinates file: {str(e)}")
+
 @app.delete("/api/projects/{project_id}/photos/{photo_id}")
 def delete_photo(
     project_id: int,
