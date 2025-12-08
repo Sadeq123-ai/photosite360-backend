@@ -4,7 +4,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, R
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, Text, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from passlib.context import CryptContext
@@ -231,6 +231,51 @@ class Invitation(Base):
 
 # Crear tablas
 Base.metadata.create_all(bind=engine)
+
+# Función para ejecutar migraciones automáticas
+def run_auto_migrations():
+    """Ejecuta migraciones necesarias para agregar campos faltantes"""
+    try:
+        with engine.connect() as conn:
+            # Verificar si coordinate_source existe en photos
+            result = conn.execute(text("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'photos' AND column_name = 'coordinate_source'
+            """))
+
+            if not result.fetchone():
+                print("⚙️  Running migration: Adding coordinate_source to photos...")
+                conn.execute(text("""
+                    ALTER TABLE photos
+                    ADD COLUMN coordinate_source VARCHAR DEFAULT 'manual'
+                """))
+                conn.commit()
+                print("✅ Migration complete: coordinate_source added to photos")
+
+            # Verificar si coordinate_source existe en gallery_images
+            result = conn.execute(text("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'gallery_images' AND column_name = 'coordinate_source'
+            """))
+
+            if not result.fetchone():
+                print("⚙️  Running migration: Adding coordinate_source to gallery_images...")
+                conn.execute(text("""
+                    ALTER TABLE gallery_images
+                    ADD COLUMN coordinate_source VARCHAR DEFAULT 'manual'
+                """))
+                conn.commit()
+                print("✅ Migration complete: coordinate_source added to gallery_images")
+
+    except Exception as e:
+        print(f"⚠️  Migration warning: {e}")
+        # No fallar si la migración tiene problemas, solo advertir
+
+# Ejecutar migraciones automáticas
+if DATABASE_URL.startswith("postgresql://"):
+    run_auto_migrations()
 
 # Contexto de contraseñas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
