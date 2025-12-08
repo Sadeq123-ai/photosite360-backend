@@ -126,6 +126,9 @@ class Photo(Base):
     project_y = Column(Float, nullable=True)
     project_z = Column(Float, nullable=True)
 
+    # Origen de coordenadas: 'local', 'utm', 'geo', 'manual'
+    coordinate_source = Column(String, default="manual", nullable=True)
+
     # Tipo de objeto
     object_type = Column(String, default="360photo")
 
@@ -165,6 +168,9 @@ class GalleryImage(Base):
     project_x = Column(Float, nullable=True)
     project_y = Column(Float, nullable=True)
     project_z = Column(Float, nullable=True)
+
+    # Origen de coordenadas: 'local', 'utm', 'geo', 'manual'
+    coordinate_source = Column(String, default="manual", nullable=True)
 
     # Tipo de objeto
     object_type = Column(String, default="image")
@@ -1205,6 +1211,170 @@ def get_pending_invitations(
         Invitation.expires_at > datetime.utcnow()
     ).all()
     return invitations
+
+# ============================================================================
+# ENDPOINT DE IMPORTACIÓN DE COORDENADAS
+# ============================================================================
+
+@app.post("/api/projects/{project_id}/import-coordinates")
+async def import_coordinates(
+    project_id: int,
+    file: UploadFile = File(...),
+    coordinate_type: str = Form(...),  # 'local', 'utm', 'geo'
+    object_type: str = Form("foto360"),  # 'foto360', 'imagen', 'incidencia'
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Importa coordenadas desde archivo CSV/Excel/TXT
+
+    Formato esperado del archivo:
+    - Columnas: nombre_imagen, x, y, z (pueden variar nombres)
+    - Separador: ; , tab (autodetección)
+
+    coordinate_type:
+      - 'local': Coordenadas locales del proyecto (X, Y, Z)
+      - 'utm': Coordenadas UTM ETRS89 (Easting, Northing, Z)
+      - 'geo': Coordenadas geográficas WGS84 (Latitud, Longitud, altitud)
+    """
+    import pandas as pd
+    import io
+
+    # Verificar proyecto
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.owner_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        # Leer archivo
+        content = await file.read()
+        filename = file.filename.lower()
+
+        # Parsear según extensión
+        if filename.endswith('.csv') or filename.endswith('.txt'):
+            # Intentar detectar separador
+            text_content = content.decode('utf-8-sig')  # utf-8-sig ignora BOM
+
+            # Detectar separador
+            if ';' in text_content.split('\n')[0]:
+                df = pd.read_csv(io.StringIO(text_content), sep=';')
+            elif ',' in text_content.split('\n')[0]:
+                df = pd.read_csv(io.StringIO(text_content), sep=',')
+            else:
+                df = pd.read_csv(io.StringIO(text_content), sep='\t')
+
+        elif filename.endswith('.xlsx') or filename.endswith('.xls'):
+            df = pd.read_excel(io.BytesIO(content))
+
+        else:
+            raise HTTPException(status_code=400, detail="Formato de archivo no soportado. Use CSV, TXT o Excel")
+
+        # Normalizar nombres de columnas (quitar espacios, minúsculas)
+        df.columns = df.columns.str.strip().str.lower()
+
+        # Mapeo flexible de nombres de columnas
+        column_mappings = {
+            'nombre': ['nombre_imagen', 'nombre', 'imagen', 'filename', 'file', 'name', 'photo'],
+            'x': ['x', 'easting', 'longitude', 'lon', 'lng', 'project_x'],
+            'y': ['y', 'northing', 'latitude', 'lat', 'project_y'],
+            'z': ['z', 'altura', 'elevation', 'altitud', 'height', 'project_z', 'cota'],
+            'tipo': ['tipo', 'type', 'object_type', 'categoria']
+        }
+
+        # Encontrar columnas reales
+        def find_column(df_columns, possible_names):
+            for col in df_columns:
+                if col in possible_names:
+                    return col
+            return None
+
+        nombre_col = find_column(df.columns, column_mappings['nombre'])
+        x_col = find_column(df.columns, column_mappings['x'])
+        y_col = find_column(df.columns, column_mappings['y'])
+        z_col = find_column(df.columns, column_mappings['z'])
+        tipo_col = find_column(df.columns, column_mappings['tipo'])
+
+        if not nombre_col:
+            raise HTTPException(status_code=400, detail=f"No se encontró columna de nombre de imagen. Columnas disponibles: {list(df.columns)}")
+
+        if not x_col or not y_col:
+            raise HTTPException(status_code=400, detail=f"No se encontraron columnas X e Y. Columnas disponibles: {list(df.columns)}")
+
+        # Procesar cada fila
+        imported_count = 0
+        updated_count = 0
+        errors = []
+
+        for idx, row in df.iterrows():
+            try:
+                nombre_imagen = str(row[nombre_col]).strip()
+                x_value = float(row[x_col])
+                y_value = float(row[y_col])
+                z_value = float(row[z_col]) if z_col and pd.notna(row[z_col]) else 0.0
+                tipo_objeto = str(row[tipo_col]).strip() if tipo_col and pd.notna(row[tipo_col]) else object_type
+
+                # Buscar foto/imagen existente por nombre
+                photo = db.query(Photo).filter(
+                    Photo.project_id == project_id,
+                    Photo.title.contains(nombre_imagen)
+                ).first()
+
+                gallery_image = db.query(GalleryImage).filter(
+                    GalleryImage.project_id == project_id,
+                    GalleryImage.filename.contains(nombre_imagen)
+                ).first()
+
+                target = photo or gallery_image
+
+                if target:
+                    # Actualizar coordenadas según tipo
+                    if coordinate_type == 'local':
+                        target.project_x = x_value
+                        target.project_y = y_value
+                        target.project_z = z_value
+                        target.coordinate_source = 'local'
+
+                    elif coordinate_type == 'utm':
+                        target.utm_easting = x_value
+                        target.utm_northing = y_value
+                        target.project_z = z_value
+                        target.coordinate_source = 'utm'
+                        # También calcular coordenadas locales (si hay origen definido)
+                        # TODO: implementar transformación UTM -> Local
+
+                    elif coordinate_type == 'geo':
+                        target.geo_latitude = x_value
+                        target.geo_longitude = y_value
+                        target.project_z = z_value
+                        target.coordinate_source = 'geo'
+                        # También calcular UTM y Local
+                        # TODO: implementar transformación Geo -> UTM -> Local
+
+                    target.object_type = tipo_objeto
+                    updated_count += 1
+                else:
+                    errors.append(f"Fila {idx + 2}: Imagen '{nombre_imagen}' no encontrada en el proyecto")
+
+            except Exception as e:
+                errors.append(f"Fila {idx + 2}: Error procesando - {str(e)}")
+
+        db.commit()
+
+        return {
+            "message": "Importación completada",
+            "imported": imported_count,
+            "updated": updated_count,
+            "total_rows": len(df),
+            "errors": errors if errors else None,
+            "coordinate_type": coordinate_type
+        }
+
+    except Exception as e:
+        print(f"[ERROR] Failed to import coordinates: {e}")
+        raise HTTPException(status_code=400, detail=f"Error al importar coordenadas: {str(e)}")
 
 print("\n" + "=" * 60)
 print("INICIANDO PHOTOSITE360 BACKEND")
