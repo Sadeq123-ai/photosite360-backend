@@ -656,16 +656,6 @@ def get_photos(project_id: int, db: Session = Depends(get_db), current_user: Use
         raise HTTPException(status_code=404, detail="Project not found")
 
     photos = db.query(Photo).filter(Photo.project_id == project_id).all()
-
-    # 🔍 DEBUG: Ver coordenadas de las fotos
-    print(f"\n🔍 DEBUG - Proyecto {project_id} ({project.name}): {len(photos)} fotos")
-    for photo in photos[:3]:  # Solo las primeras 3 para no saturar logs
-        print(f"  📷 {photo.title}")
-        print(f"     project_x={photo.project_x}, project_y={photo.project_y}, project_z={photo.project_z}")
-        print(f"     geo_lat={photo.geo_latitude}, geo_lng={photo.geo_longitude}")
-        print(f"     utm_e={photo.utm_easting}, utm_n={photo.utm_northing}")
-        print(f"     latitude={getattr(photo, 'latitude', 'N/A')}, longitude={getattr(photo, 'longitude', 'N/A')}")
-
     return photos
 
 @app.put("/api/projects/{project_id}/photos/{photo_id}/coordinates")
