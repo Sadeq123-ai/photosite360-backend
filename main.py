@@ -367,6 +367,17 @@ class GalleryImageResponse(BaseModel):
 # FastAPI app
 app = FastAPI(title="PhotoSite360 API")
 
+# Crear tablas extendidas al iniciar la aplicacion
+@app.on_event("startup")
+async def startup_event():
+    try:
+        from models_extended import create_all_tables
+        create_all_tables(engine)
+        print("Tablas extendidas verificadas/creadas correctamente")
+    except Exception as e:
+        print(f"Error al crear tablas extendidas: {e}")
+
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
