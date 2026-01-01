@@ -4,8 +4,9 @@ from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, R
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, Text, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime, Boolean, Text, text, Index, JSON
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from passlib.context import CryptContext
 from jose.exceptions import JWTError as JWTException
@@ -79,6 +80,11 @@ else:
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# Detectar si estamos usando PostgreSQL o SQLite (para modelos extendidos)
+IS_POSTGRES = DATABASE_URL.startswith("postgresql://") or DATABASE_URL.startswith("postgres://")
+JSONType = JSONB if IS_POSTGRES else JSON
+
 
 # Modelos de base de datos
 class User(Base):
@@ -281,6 +287,199 @@ if DATABASE_URL.startswith("postgresql://"):
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
+# ============================================================================
+# MODELOS EXTENDIDOS GIS/BIM
+# ============================================================================
+
+# Detectar si estamos usando PostgreSQL o SQLite
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./photosite360.db")
+IS_POSTGRES = DATABASE_URL.startswith("postgresql://") or DATABASE_URL.startswith("postgres://")
+
+# Usar JSONB para PostgreSQL, JSON para SQLite
+JSONType = JSONB if IS_POSTGRES else JSON
+
+# ============================================================================
+# MODELO: ProjectExtended (Configuración ampliada de proyectos)
+# ============================================================================
+
+class ProjectExtended(Base):
+    """
+    Extensión de configuración para proyectos
+    Se vincula con la tabla 'projects' existente
+    """
+    __tablename__ = "projects_extended"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, unique=True, index=True)  # FK a projects.id
+
+    # 🏢 TIPO DE PROYECTO
+    project_type = Column(String, default="edificacion")
+    # Valores: "edificacion" o "obra_lineal"
+
+    # 📐 CONFIGURACIÓN DE NIVELES (EDIFICACIÓN)
+    level_config = Column(JSONType, default={
+        "levels": [
+            {"code": "S01", "name": "Sótano 1", "elevation": -3.0},
+            {"code": "P00", "name": "Planta Baja", "elevation": 0.0},
+            {"code": "P01", "name": "Planta 1", "elevation": 3.0},
+            {"code": "P02", "name": "Planta 2", "elevation": 6.0}
+        ],
+        "default_height": 3.0
+    })
+
+    # 🛣️ CONFIGURACIÓN DE PKs (OBRA LINEAL)
+    pk_config = Column(JSONType, default={
+        "pk_start": 0.0,
+        "pk_end": 1000.0,
+        "interval": 20.0,
+        "axis_name": "Eje 1"
+    })
+
+    # 🔗 Integración BIM/CAD
+    revit_file_id = Column(String, nullable=True)
+    civil3d_file_path = Column(String, nullable=True)
+    ifc_file_url = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+
+# ============================================================================
+# MODELO: ProjectObject (Objetos unificados con soporte GIS)
+# ============================================================================
+
+class ProjectObject(Base):
+    """
+    Modelo unificado para todos los objetos del proyecto
+    Reemplazará gradualmente a Photo y GalleryImage
+    """
+    __tablename__ = "project_objects"
+
+    # 🆔 Identificación
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, index=True)  # FK a projects.id
+    name = Column(String)
+
+    # 📸 TIPO DE OBJETO
+    object_type = Column(String, index=True)
+    # Valores: "foto360", "imagen", "incidencia", "punto_control", "elemento_bim"
+
+    # 🏷️ Clasificación y organización
+    group_name = Column(String, nullable=True, index=True)
+    tags = Column(JSONType, default=[])  # Array de tags
+
+    # 📐 COORDENADAS UTM ETRS89 (SIEMPRE PRESENTES)
+    utm_zone = Column(Integer, default=30)  # 28, 29, 30, 31
+    utm_easting = Column(Float, nullable=False, default=0.0)   # X
+    utm_northing = Column(Float, nullable=False, default=0.0)  # Y
+    elevation = Column(Float, nullable=False, default=0.0)      # Z
+
+    # 🏢 EDIFICACIÓN - Nivel
+    level = Column(String, nullable=True, index=True)
+    # Valores: "S01", "P00", "P01", "P02", etc.
+    level_elevation = Column(Float, nullable=True)
+
+    # 🛣️ OBRA LINEAL - PK
+    pk = Column(Float, nullable=True, index=True)
+    pk_offset = Column(Float, default=0.0)  # Desplazamiento lateral
+    axis = Column(String, nullable=True)     # Nombre del eje
+
+    # 📝 Información general
+    description = Column(Text, nullable=True)
+    url = Column(String, nullable=True)  # Cloudinary URL
+
+    # 💬 COMENTARIOS (Array de objetos)
+    comments = Column(JSONType, default=[])
+    # Formato: [{"text": "...", "user": "...", "date": "...", "user_id": 1}]
+
+    # 🎨 CAMPOS PERSONALIZADOS (Totalmente flexible)
+    attributes = Column(JSONType, default={})
+    # Ejemplos:
+    # {"severidad": "crítico", "responsable": "Juan", "temperatura": 25.5}
+
+    # 🔗 INTEGRACIÓN BIM/GIS
+    ifc_guid = Column(String, nullable=True, index=True)
+    revit_element_id = Column(String, nullable=True)
+    civil3d_handle = Column(String, nullable=True)
+    cloudcompare_id = Column(String, nullable=True)
+
+    # 📅 Auditoría
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+    created_by = Column(Integer, nullable=True)  # FK a users.id
+
+    # 📊 Índices compuestos para queries rápidos
+    __table_args__ = (
+        Index('idx_project_type', 'project_id', 'object_type'),
+        Index('idx_project_level', 'project_id', 'level'),
+        Index('idx_project_pk', 'project_id', 'pk'),
+        Index('idx_project_date', 'project_id', 'created_at'),
+        Index('idx_project_group', 'project_id', 'group_name'),
+    )
+
+# ============================================================================
+# MODELO: TableTemplate (Plantillas de tablas personalizadas)
+# ============================================================================
+
+class TableTemplate(Base):
+    """
+    Plantillas guardadas para exportación de tablas personalizadas
+    """
+    __tablename__ = "table_templates"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, index=True)
+    name = Column(String)
+    description = Column(Text, nullable=True)
+
+    # Configuración de la tabla
+    config = Column(JSONType)
+    # {
+    #   "filters": {"object_type": "incidencia", "level": "P01"},
+    #   "columns": ["name", "utm_easting", "utm_northing", "elevation"],
+    #   "export_format": "excel",
+    #   "options": {"include_charts": true}
+    # }
+
+    is_public = Column(Boolean, default=False)
+    created_by = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+# ============================================================================
+# MODELO: ProjectStats (Estadísticas precalculadas para charts)
+# ============================================================================
+
+class ProjectStats(Base):
+    """
+    Estadísticas precalculadas para mejorar performance de charts
+    Se actualiza cada vez que cambian los objetos del proyecto
+    """
+    __tablename__ = "project_stats"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, unique=True, index=True)
+
+    # Contadores generales
+    total_objects = Column(Integer, default=0)
+    total_fotos360 = Column(Integer, default=0)
+    total_imagenes = Column(Integer, default=0)
+    total_incidencias = Column(Integer, default=0)
+
+    # Incidencias por severidad
+    incidencias_criticas = Column(Integer, default=0)
+    incidencias_moderadas = Column(Integer, default=0)
+    incidencias_leves = Column(Integer, default=0)
+
+    # Por nivel (JSONB para flexibilidad)
+    stats_by_level = Column(JSONType, default={})
+    # {"P00": {"incidencias": 5, "fotos": 10}, "P01": {...}}
+
+    # Por PK (obra lineal)
+    stats_by_pk_range = Column(JSONType, default={})
+    # {"0-100": {"incidencias": 3}, "100-200": {...}}
+
+    # Última actualización
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 # Pydantic models
 class UserCreate(BaseModel):
     email: str
@@ -371,12 +570,13 @@ app = FastAPI(title="PhotoSite360 API")
 @app.on_event("startup")
 async def startup_event():
     try:
-        from models_extended import create_all_tables
-        create_all_tables(engine)
-        print("Tablas extendidas verificadas/creadas correctamente")
+        # Crear todas las tablas (incluyendo las extendidas)
+        Base.metadata.create_all(bind=engine)
+        print("Tablas verificadas/creadas correctamente")
     except Exception as e:
-        print(f"Error al crear tablas extendidas: {e}")
-
+        print(f"Error al crear tablas: {e}")
+        import traceback
+        traceback.print_exc()
 
 # CORS middleware
 app.add_middleware(
@@ -1724,7 +1924,6 @@ async def get_database_overview(current_user: dict = Depends(get_current_user), 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/admin/projects-extended")
 async def get_projects_extended(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     """
@@ -1757,7 +1956,6 @@ async def get_projects_extended(current_user: dict = Depends(get_current_user), 
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/admin/project-objects")
 async def get_project_objects(
@@ -1823,7 +2021,6 @@ async def get_project_objects(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/admin/table-templates")
 async def get_table_templates(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     """
@@ -1854,7 +2051,6 @@ async def get_table_templates(current_user: dict = Depends(get_current_user), db
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/admin/project-stats")
 async def get_project_stats(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -1890,7 +2086,6 @@ async def get_project_stats(current_user: dict = Depends(get_current_user), db: 
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 print("\n" + "=" * 60)
 print("INICIANDO PHOTOSITE360 BACKEND")
