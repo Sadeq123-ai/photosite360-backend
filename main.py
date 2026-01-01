@@ -1881,7 +1881,6 @@ async def get_database_overview(current_user: dict = Depends(get_current_user), 
     Vista general de todas las tablas de la base de datos
     """
     try:
-        from models_extended import ProjectExtended, ProjectObject, TableTemplate, ProjectStats
 
         # Contar registros en tablas antiguas
         users_count = db.query(User).count()
@@ -1930,7 +1929,6 @@ async def get_projects_extended(current_user: dict = Depends(get_current_user), 
     Obtener todas las configuraciones extendidas de proyectos
     """
     try:
-        from models_extended import ProjectExtended
 
         configs = db.query(ProjectExtended).all()
 
@@ -1970,7 +1968,6 @@ async def get_project_objects(
     Obtener objetos del proyecto con filtros opcionales
     """
     try:
-        from models_extended import ProjectObject
 
         query = db.query(ProjectObject)
 
@@ -2027,7 +2024,6 @@ async def get_table_templates(current_user: dict = Depends(get_current_user), db
     Obtener todas las plantillas de tablas
     """
     try:
-        from models_extended import TableTemplate
 
         templates = db.query(TableTemplate).all()
 
@@ -2058,7 +2054,6 @@ async def get_project_stats(current_user: dict = Depends(get_current_user), db: 
     Obtener estadísticas de todos los proyectos
     """
     try:
-        from models_extended import ProjectStats
 
         stats = db.query(ProjectStats).all()
 
