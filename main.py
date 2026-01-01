@@ -1660,6 +1660,227 @@ async def recalculate_all_coordinates(
         "errors": errors if errors else None
     }
 
+# ============================================================================
+# ENDPOINTS: Base de Datos Extendida (Administración)
+# ============================================================================
+
+@app.get("/api/admin/database-overview")
+async def get_database_overview(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Vista general de todas las tablas de la base de datos
+    """
+    try:
+        from models_extended import ProjectExtended, ProjectObject, TableTemplate, ProjectStats
+
+        # Contar registros en tablas antiguas
+        users_count = db.query(User).count()
+        projects_count = db.query(Project).count()
+        photos_count = db.query(Photo).count()
+        gallery_images_count = db.query(GalleryImage).count()
+
+        # Contar registros en tablas nuevas
+        try:
+            projects_extended_count = db.query(ProjectExtended).count()
+            project_objects_count = db.query(ProjectObject).count()
+            table_templates_count = db.query(TableTemplate).count()
+            project_stats_count = db.query(ProjectStats).count()
+        except:
+            # Si las tablas no existen aún
+            projects_extended_count = 0
+            project_objects_count = 0
+            table_templates_count = 0
+            project_stats_count = 0
+
+        return {
+            "tablas_originales": {
+                "users": users_count,
+                "projects": projects_count,
+                "photos": photos_count,
+                "gallery_images": gallery_images_count
+            },
+            "tablas_extendidas": {
+                "projects_extended": projects_extended_count,
+                "project_objects": project_objects_count,
+                "table_templates": table_templates_count,
+                "project_stats": project_stats_count
+            },
+            "total_registros": (
+                users_count + projects_count + photos_count + gallery_images_count +
+                projects_extended_count + project_objects_count +
+                table_templates_count + project_stats_count
+            )
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/projects-extended")
+async def get_projects_extended(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Obtener todas las configuraciones extendidas de proyectos
+    """
+    try:
+        from models_extended import ProjectExtended
+
+        configs = db.query(ProjectExtended).all()
+
+        result = []
+        for config in configs:
+            # Obtener nombre del proyecto
+            project = db.query(Project).filter(Project.id == config.project_id).first()
+
+            result.append({
+                "id": config.id,
+                "project_id": config.project_id,
+                "project_name": project.name if project else "Desconocido",
+                "project_type": config.project_type,
+                "level_config": config.level_config,
+                "pk_config": config.pk_config,
+                "revit_file_id": config.revit_file_id,
+                "civil3d_file_path": config.civil3d_file_path,
+                "ifc_file_url": config.ifc_file_url,
+                "created_at": config.created_at.isoformat() if config.created_at else None,
+                "updated_at": config.updated_at.isoformat() if config.updated_at else None
+            })
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/project-objects")
+async def get_project_objects(
+    project_id: Optional[int] = None,
+    object_type: Optional[str] = None,
+    level: Optional[str] = None,
+    limit: int = 100,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtener objetos del proyecto con filtros opcionales
+    """
+    try:
+        from models_extended import ProjectObject
+
+        query = db.query(ProjectObject)
+
+        if project_id:
+            query = query.filter(ProjectObject.project_id == project_id)
+        if object_type:
+            query = query.filter(ProjectObject.object_type == object_type)
+        if level:
+            query = query.filter(ProjectObject.level == level)
+
+        objects = query.order_by(ProjectObject.created_at.desc()).limit(limit).all()
+
+        result = []
+        for obj in objects:
+            # Obtener nombre del proyecto
+            project = db.query(Project).filter(Project.id == obj.project_id).first()
+
+            result.append({
+                "id": obj.id,
+                "project_id": obj.project_id,
+                "project_name": project.name if project else "Desconocido",
+                "name": obj.name,
+                "object_type": obj.object_type,
+                "group_name": obj.group_name,
+                "tags": obj.tags,
+                "coordinates": {
+                    "utm_zone": obj.utm_zone,
+                    "utm_easting": obj.utm_easting,
+                    "utm_northing": obj.utm_northing,
+                    "elevation": obj.elevation
+                },
+                "level": obj.level,
+                "level_elevation": obj.level_elevation,
+                "pk": obj.pk,
+                "pk_offset": obj.pk_offset,
+                "axis": obj.axis,
+                "description": obj.description,
+                "url": obj.url,
+                "comments": obj.comments,
+                "attributes": obj.attributes,
+                "ifc_guid": obj.ifc_guid,
+                "revit_element_id": obj.revit_element_id,
+                "civil3d_handle": obj.civil3d_handle,
+                "created_at": obj.created_at.isoformat() if obj.created_at else None
+            })
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/table-templates")
+async def get_table_templates(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Obtener todas las plantillas de tablas
+    """
+    try:
+        from models_extended import TableTemplate
+
+        templates = db.query(TableTemplate).all()
+
+        result = []
+        for template in templates:
+            # Obtener nombre del proyecto
+            project = db.query(Project).filter(Project.id == template.project_id).first()
+
+            result.append({
+                "id": template.id,
+                "project_id": template.project_id,
+                "project_name": project.name if project else "Desconocido",
+                "name": template.name,
+                "description": template.description,
+                "config": template.config,
+                "is_public": template.is_public,
+                "created_by": template.created_by,
+                "created_at": template.created_at.isoformat() if template.created_at else None
+            })
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/project-stats")
+async def get_project_stats(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Obtener estadísticas de todos los proyectos
+    """
+    try:
+        from models_extended import ProjectStats
+
+        stats = db.query(ProjectStats).all()
+
+        result = []
+        for stat in stats:
+            # Obtener nombre del proyecto
+            project = db.query(Project).filter(Project.id == stat.project_id).first()
+
+            result.append({
+                "id": stat.id,
+                "project_id": stat.project_id,
+                "project_name": project.name if project else "Desconocido",
+                "total_objects": stat.total_objects,
+                "total_fotos360": stat.total_fotos360,
+                "total_imagenes": stat.total_imagenes,
+                "total_incidencias": stat.total_incidencias,
+                "incidencias_criticas": stat.incidencias_criticas,
+                "incidencias_moderadas": stat.incidencias_moderadas,
+                "incidencias_leves": stat.incidencias_leves,
+                "stats_by_level": stat.stats_by_level,
+                "stats_by_pk_range": stat.stats_by_pk_range,
+                "updated_at": stat.updated_at.isoformat() if stat.updated_at else None
+            })
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 print("\n" + "=" * 60)
 print("INICIANDO PHOTOSITE360 BACKEND")
 print("=" * 60)
